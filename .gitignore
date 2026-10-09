@@ -1,0 +1,35 @@
+# Build e cache local do Maven
+target/
+.m2/
+*.class
+
+# Configurações locais de IDEs
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Cofres, backups e arquivos auxiliares do SQLite
+.cofre-local/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.cofre
+.cofre-backup-*.tmp
+
+# Logs, arquivos temporários e configurações privadas
+*.log
+*.tmp
+.env
+.env.*
+!.env.example
+
+# Arquivos do sistema operacional
+Thumbs.db
+Desktop.ini
+.DS_Store
