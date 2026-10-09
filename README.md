@@ -1,6 +1,6 @@
-# Cofre local — etapas 1 a 5
+# Cofre local — etapas 1 a 6
 
-Aplicativo desktop Java/JavaFX: criação e desbloqueio com senha mestra, cadastro, edição, pesquisa, exclusão, bloqueio, backup e restauração do cofre. A extensão Chrome consulta a sessão e mostra as contas correspondentes ao site aberto pelo host Native Messaging. Implementa os itens 1 a 5 da ordem de implementação, incluindo preenchimento de login mediante clique.
+Aplicativo desktop Java/JavaFX: criação e desbloqueio com senha mestra, cadastro, edição, pesquisa, exclusão, bloqueio, backup e restauração do cofre. A extensão Chrome consulta a sessão e mostra as contas correspondentes ao site aberto pelo host Native Messaging. Implementa os itens 1 a 6 da ordem de implementação, incluindo preenchimento de login mediante clique e automático autorizado por site.
 
 ## Executar
 
@@ -57,9 +57,17 @@ A liberação é vinculada à conta, origem e documento, com autorização de us
 
 Ao atualizar de uma etapa anterior: execute novamente `npm.cmd test` na pasta da extensão, recarregue a extensão em `chrome://extensions`, reexecute o instalador do host com o mesmo ID e reinicie o desktop. O executável anteriormente instalado não aceita o novo comando até ser atualizado.
 
-Alternar para o navegador ou abrir o popup não bloqueia o cofre. O desbloqueio permanece exclusivamente na interface desktop. A inatividade é medida pelas interações no desktop: consultar o estado pela extensão não renova o prazo de 5 minutos.
+Alternar para o navegador ou abrir o popup não bloqueia o cofre. A inatividade é medida pelas interações no desktop: consultar o estado pela extensão não renova o prazo de 5 minutos.
 
-O host não abre outra sessão SQLite. Ele consulta a sessão desktop por loopback autenticado, com token aleatório em um arquivo restrito ao dono por ACL do Windows (ou permissões POSIX). O arquivo de descoberta é apagado ao fechar o desktop, e um lock impede duas sessões na mesma pasta. Não há servidor acessível pela rede externa nem senhas persistidas na extensão. O protocolo aceita `GET_STATUS`, `LIST_MATCHES`, `REQUEST_FILL`, `REQUEST_AUTOMATIC_FILL` e `CONFIRM_FILL`, com versão e ID de correlação; mensagens inválidas são rejeitadas e os frames são limitados a 64 KiB.
+### Desbloquear pela extensão
+
+Com o aplicativo desktop aberto e o cofre bloqueado, abra o popup, digite a senha mestra e clique em **Desbloquear cofre**. A extensão desbloqueia a mesma sessão usada pelo desktop, atualiza a tela do aplicativo e consulta novamente as contas do site. Um desbloqueio bem-sucedido reinicia o prazo de inatividade.
+
+Se o desktop estiver fechado, a extensão pede para abri-lo; o host não abre o banco nem inicia outra sessão. A criação do cofre continua no desktop. Uma senha incorreta mantém o cofre bloqueado. Operações desktop em curso recusam o pedido, e um bloqueio durante o processamento invalida o desbloqueio pendente.
+
+A senha mestra é enviada apenas pelo popup próprio, pelo host e pela ponte local autenticada até o desktop. O campo é limpo no envio; a senha não é persistida, incluída nas respostas ou registrada em logs. Strings e cópias internas de JavaScript/JVM não permitem garantir apagamento imediato da memória. Para aplicar esta atualização, recarregue a extensão, reexecute o instalador do host e reinicie o desktop.
+
+O host não abre outra sessão SQLite. Ele consulta a sessão desktop por loopback autenticado, com token aleatório em um arquivo restrito ao dono por ACL do Windows (ou permissões POSIX). O arquivo de descoberta é apagado ao fechar o desktop, e um lock impede duas sessões na mesma pasta. Não há servidor acessível pela rede externa nem senhas persistidas na extensão. O protocolo aceita `GET_STATUS`, `UNLOCK_VAULT`, `LIST_MATCHES`, `REQUEST_FILL`, `REQUEST_AUTOMATIC_FILL` e `CONFIRM_FILL`, com versão e ID de correlação; mensagens inválidas são rejeitadas e os frames são limitados a 64 KiB.
 
 ### Preenchimento automático por site
 

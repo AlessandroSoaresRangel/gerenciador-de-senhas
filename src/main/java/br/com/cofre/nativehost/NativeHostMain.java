@@ -11,7 +11,8 @@ public final class NativeHostMain {
             return;
         }
         var client = new StatusClient(PrivateEndpoint.defaultFile());
-        var protocol = new StatusProtocol(() -> "APP_CLOSED", origin -> java.util.List.of(), FillProtocol.validationOnly());
+        var protocol = new StatusProtocol(() -> "APP_CLOSED", origin -> java.util.List.of(),
+                FillProtocol.validationOnly(), UnlockProtocol.validationOnly());
         var codec = new NativeMessageCodec();
         byte[] input;
         while ((input = codec.read(System.in)) != null) {

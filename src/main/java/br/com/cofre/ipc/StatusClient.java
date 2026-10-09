@@ -13,6 +13,7 @@ public final class StatusClient {
     private static final int MAX_ENDPOINT_BYTES = 4096;
     private static final int CONNECT_TIMEOUT_MILLIS = 1000;
     private static final int RESPONSE_TIMEOUT_MILLIS = 3000;
+    private static final int UNLOCK_RESPONSE_TIMEOUT_MILLIS = 15000;
     private final Path endpoint;
     private final ObjectMapper json = new ObjectMapper();
 
@@ -30,7 +31,9 @@ public final class StatusClient {
             try (Socket socket = new Socket()) {
                 socket.connect(
                         new InetSocketAddress("127.0.0.1", settings.path("port").asInt()), CONNECT_TIMEOUT_MILLIS);
-                socket.setSoTimeout(RESPONSE_TIMEOUT_MILLIS);
+                boolean unlocking = "UNLOCK_VAULT".equals(json.readTree(request).path("command").asText());
+                // Argon2 e a atualização da interface desktop podem levar mais que uma consulta.
+                socket.setSoTimeout(unlocking ? UNLOCK_RESPONSE_TIMEOUT_MILLIS : RESPONSE_TIMEOUT_MILLIS);
                 var codec = new NativeMessageCodec();
                 codec.write(
                         socket.getOutputStream(),

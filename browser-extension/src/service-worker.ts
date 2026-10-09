@@ -2,6 +2,7 @@ import { HOST_NAME, NATIVE_REQUEST_TIMEOUT_MILLIS, PROTOCOL_VERSION, validateSta
 import { listActiveTabMatches } from "./matches.js";
 import { fillAccount } from "./fill.js";
 import { automaticAccount, setAutomaticAccount } from "./autofill.js";
+import { unlockVault } from "./unlock.js";
 
 const pendingAutomaticTabs = new Set<number>();
 
@@ -35,9 +36,17 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     // Somente o popup próprio pode consultar o cofre; mensagens de páginas/sites são recusadas.
     if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL("popup.html") ||
         typeof message !== "object" || message === null ||
-        !["GET_STATUS", "LIST_MATCHES", "REQUEST_FILL", "SET_AUTOFILL", "GET_AUTOFILL"].includes(String((message as Record<string, unknown>).command)))
+        !["GET_STATUS", "LIST_MATCHES", "REQUEST_FILL", "SET_AUTOFILL", "GET_AUTOFILL", "UNLOCK_VAULT"].includes(String((message as Record<string, unknown>).command)))
         return false;
     const request = message as Record<string, unknown>;
+    if (request.command === "UNLOCK_VAULT") {
+        if (Object.keys(request).length !== 2 || typeof request.password !== "string")
+            return false;
+        const unlocking = unlockVault(request.password);
+        request.password = "";
+        void unlocking.then(respond).catch(() => respond({ok: false, error: "UNLOCK_DENIED"}));
+        return true;
+    }
     if (request.command === "SET_AUTOFILL" || request.command === "GET_AUTOFILL") {
         void (async () => {
             const [tab] = await chrome.tabs.query({active: true, currentWindow: true});

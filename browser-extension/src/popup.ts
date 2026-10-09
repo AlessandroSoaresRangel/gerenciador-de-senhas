@@ -3,8 +3,11 @@ const statusLabel = document.querySelector<HTMLParagraphElement>("#status")!;
 const refresh = document.querySelector<HTMLButtonElement>("#refresh")!;
 const accounts = document.querySelector<HTMLUListElement>("#accounts")!;
 const originLabel = document.querySelector<HTMLParagraphElement>("#origin")!;
+const unlockForm = document.querySelector<HTMLFormElement>("#unlock-form")!;
+const masterPassword = document.querySelector<HTMLInputElement>("#master-password")!;
+const unlockButton = document.querySelector<HTMLButtonElement>("#unlock")!;
 const labels: Record<string, string> = {
-    LOCKED: "Cofre bloqueado. Desbloqueie no aplicativo.",
+    LOCKED: "Cofre bloqueado. Digite a senha mestra para desbloquear.",
     UNLOCKED: "Cofre desbloqueado.",
     NOT_CREATED: "Crie o cofre no aplicativo.",
     APP_CLOSED: "Abra o aplicativo Cofre local.",
@@ -18,10 +21,13 @@ async function update() {
     if (refresh.disabled)
         return;
     refresh.disabled = true;
+    unlockForm.hidden = true;
+    masterPassword.value = "";
     clearAccounts();
     statusLabel.textContent = "Consultando…";
     try {
         const response = await chrome.runtime.sendMessage({ command: "GET_STATUS" });
+        unlockForm.hidden = !(response?.ok && response.status === "LOCKED");
         if (!response?.ok || response.status !== "UNLOCKED") {
             clearAccounts();
             statusLabel.textContent = response?.ok && labels[response.status] ? labels[response.status] :
@@ -121,4 +127,41 @@ async function update() {
     }
 }
 refresh.addEventListener("click", () => void update());
+unlockForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (refresh.disabled || unlockForm.hidden || !masterPassword.value)
+        return;
+    const request = {command: "UNLOCK_VAULT", password: masterPassword.value};
+    masterPassword.value = "";
+    masterPassword.disabled = true;
+    unlockButton.disabled = true;
+    refresh.disabled = true;
+    statusLabel.textContent = "Desbloqueando…";
+    let unlocked = false;
+    try {
+        const pending = chrome.runtime.sendMessage(request);
+        request.password = "";
+        const result = await pending;
+        unlocked = result?.ok === true && result.status === "UNLOCKED";
+        if (!unlocked) {
+            unlockForm.hidden = result?.error === "APP_CLOSED";
+            statusLabel.textContent = result?.error === "APP_CLOSED"
+                ? "Abra o aplicativo Cofre local para desbloquear pela extensão."
+                : "Não foi possível desbloquear. Confira a senha e se o aplicativo está aberto.";
+        }
+    }
+    catch {
+        statusLabel.textContent = "Não foi possível conectar ao aplicativo.";
+    }
+    finally {
+        request.password = "";
+        masterPassword.value = "";
+        masterPassword.disabled = false;
+        unlockButton.disabled = false;
+        refresh.disabled = false;
+    }
+    if (unlocked)
+        await update();
+});
+window.addEventListener("pagehide", () => {masterPassword.value = "";});
 void update();

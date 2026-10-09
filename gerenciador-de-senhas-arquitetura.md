@@ -146,10 +146,11 @@ O aplicativo será modular, com estas responsabilidades:
 | Comando | Finalidade |
 |---|---|
 | `GET_STATUS` | Consultar o estado do cofre |
+| `UNLOCK_VAULT` | Desbloquear com senha mestra somente a sessão do aplicativo desktop aberto |
 | `LIST_MATCHES` | Listar contas correspondentes à origem autorizada |
 | `REQUEST_FILL` | Solicitar a credencial selecionada para um preenchimento autorizado |
 
-O desbloqueio acontece na interface desktop. Cada pedido de preenchimento fica vinculado à origem, à credencial escolhida e a uma autorização curta. Não existe um comando para entregar o cofre inteiro à extensão.
+O desbloqueio acontece na interface desktop ou no popup da extensão, sempre usando a sessão do aplicativo desktop aberto. A extensão não persiste a senha mestra. Cada pedido de preenchimento fica vinculado à origem, à credencial escolhida e a uma autorização curta. Não existe um comando para entregar o cofre inteiro à extensão.
 
 ## 7. Ordem de implementação
 

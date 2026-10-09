@@ -29,6 +29,46 @@ class VaultAppTest {
     private static final int JAVAFX_TIMEOUT_SECONDS = 20;
     @TempDir Path directory;
 
+    @Test
+    void extensionUnlocksSameSessionAndUpdatesDesktopScreen() throws Exception {
+        Path database = directory.resolve("extension.db");
+        try (var vault = new br.com.cofre.application.VaultService(database)) {
+            vault.create("senha mestra fictícia".toCharArray());
+        }
+        var application = new VaultApp();
+        var stageReference = new CompletableFuture<Stage>();
+        String previousPath = System.getProperty("vault.path");
+        try {
+            runOnJavaFx(() -> {
+                System.setProperty("vault.path", database.toString());
+                Stage stage = new Stage();
+                stageReference.complete(stage);
+                application.start(stage);
+            });
+            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            var client = new br.com.cofre.ipc.StatusClient(directory.resolve("ipc/endpoint.json"));
+            byte[] request = json.writeValueAsBytes(java.util.Map.of("version", 1,
+                    "command", "UNLOCK_VAULT", "requestId", "desktop-test", "password", "senha mestra fictícia"));
+            assertTrue(json.readTree(client.query(request)).path("ok").asBoolean());
+            runOnJavaFx(() -> {
+                Parent root = stageReference.join().getScene().getRoot();
+                assertTrue(hasLabel(root, "Minhas credenciais"));
+                button(root, "Bloquear agora").fire();
+                assertTrue(hasLabel(root, "Cofre bloqueado"));
+            });
+        } finally {
+            runOnJavaFx(() -> {
+                application.stop();
+                stageReference.join().hide();
+                if (previousPath == null) {
+                    System.clearProperty("vault.path");
+                } else {
+                    System.setProperty("vault.path", previousPath);
+                }
+            });
+        }
+    }
+
     @BeforeAll
     static void initializeJavaFx() throws Exception {
         var initialized = new CompletableFuture<Void>();

@@ -6,6 +6,7 @@ import br.com.cofre.domain.VaultEntry;
 import br.com.cofre.ipc.StatusServer;
 import br.com.cofre.nativehost.FillProtocol;
 import br.com.cofre.nativehost.StatusProtocol;
+import br.com.cofre.nativehost.UnlockProtocol;
 
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -54,6 +55,8 @@ public class VaultApp extends Application {
     private int generation;
     private boolean busy;
     private boolean listenersBound;
+    private boolean stopped;
+    private CompletableFuture<Void> pendingExtensionUnlock;
     private final ListView<VaultEntry> items = new ListView<>();
     private final TextField title = new TextField();
     private final TextField username = new TextField();
@@ -75,7 +78,8 @@ public class VaultApp extends Application {
         statusServer =
                 new StatusServer(
                         path.toAbsolutePath().getParent().resolve("ipc/endpoint.json"),
-                        new StatusProtocol(vault::status, vault::listMatches, new FillProtocol(vault)));
+                        new StatusProtocol(vault::status, vault::listMatches, new FillProtocol(vault),
+                                new UnlockProtocol(this::unlockFromExtension)));
         root.setPadding(new Insets(WINDOW_PADDING_PIXELS));
         Scene scene = new Scene(root, WINDOW_WIDTH_PIXELS, WINDOW_HEIGHT_PIXELS);
         scene.addEventFilter(InputEvent.ANY, event -> lastActivityNanos = System.nanoTime());
@@ -364,6 +368,47 @@ public class VaultApp extends Application {
                 });
     }
 
+    /**
+     * O servidor IPC espera o resultado, mas JavaFX continua livre durante Argon2. A geração
+     * invalida o retorno se houve bloqueio ou fechamento; operações desktop em curso têm prioridade.
+     */
+    private void unlockFromExtension(char[] secret) throws Exception {
+        var completion = new CompletableFuture<Void>();
+        Platform.runLater(() -> {
+            if (busy || stopped) {
+                completion.completeExceptionally(new IllegalStateException("Operação em curso."));
+                return;
+            }
+            busy = true;
+            pendingExtensionUnlock = completion;
+            int requestGeneration = generation;
+            message.setText("Desbloqueando pela extensão…");
+            worker.submit(() -> {
+                Exception failure = null;
+                try {
+                    vault.unlock(secret);
+                } catch (Exception exception) {
+                    failure = exception;
+                }
+                Exception result = failure;
+                Platform.runLater(() -> {
+                    if (stopped) {
+                        completion.completeExceptionally(new IllegalStateException("Aplicativo fechado."));
+                        return;
+                    }
+                    completeAuthentication(requestGeneration, null, result);
+                    if (requestGeneration == generation && result == null && vault.unlocked()) {
+                        completion.complete(null);
+                    } else {
+                        completion.completeExceptionally(new IllegalStateException("Desbloqueio recusado."));
+                    }
+                    pendingExtensionUnlock = null;
+                });
+            });
+        });
+        completion.get();
+    }
+
     /** Um resultado atrasado não reabre a interface se houve bloqueio durante a derivação. */
     private void completeAuthentication(int requestGeneration, Button submit, Exception failure) {
         busy = false;
@@ -372,7 +417,9 @@ public class VaultApp extends Application {
             showLocked();
             return;
         }
-        submit.setDisable(false);
+        if (submit != null) {
+            submit.setDisable(false);
+        }
         if (failure != null) {
             message.setText(
                     failure instanceof IllegalArgumentException
@@ -543,6 +590,7 @@ public class VaultApp extends Application {
 
     @Override
     public void stop() throws Exception {
+        stopped = true;
         if (statusServer != null) {
             statusServer.close();
         }
@@ -550,6 +598,11 @@ public class VaultApp extends Application {
         timer.stop();
         worker.shutdownNow();
         vault.close();
+        if (pendingExtensionUnlock != null) {
+            // close espera a operação criptográfica antes de liberar o array ao protocolo.
+            pendingExtensionUnlock.completeExceptionally(new IllegalStateException("Aplicativo fechado."));
+            pendingExtensionUnlock = null;
+        }
         clearSensitive();
     }
 

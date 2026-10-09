@@ -13,6 +13,8 @@ test("reject website and unrelated extension senders", () => {
   assert.equal(handler({command: "GET_STATUS"}, {id: "extension-test", url: "https://exemplo.com"}, () => {}), false);
   assert.equal(handler({command: "GET_STATUS"}, {id: "other", url: "chrome-extension://extension-test/popup.html"}, () => {}), false);
   assert.equal(sent, 0);
+  assert.equal(handler({command: "UNLOCK_VAULT", password: "fake"},
+    {id: "extension-test", url: "https://exemplo.com"}, () => {}), false);
 });
 
 test("completed authorized active tab starts automatic flow; unrelated origin does not", async () => {
@@ -41,4 +43,20 @@ test("forward status only from own popup", () => {
   let response;
   assert.equal(handler({command: "GET_STATUS"}, {id: "extension-test", url: "chrome-extension://extension-test/popup.html"}, value => {response = value;}), true);
   assert.deepEqual(response, {ok: true, status: "LOCKED"});
+});
+
+test("only own popup can unlock and password is removed from the received message", async () => {
+  let response;
+  let passwordReceived;
+  chrome.runtime.sendNativeMessage = (_host, request, callback) => {
+    passwordReceived = request.password;
+    callback({version: request.version, requestId: request.requestId, ok: true, status: "UNLOCKED"});
+  };
+  const request = {command: "UNLOCK_VAULT", password: "senha fictícia"};
+  assert.equal(handler(request, {id: "extension-test", url: "chrome-extension://extension-test/popup.html"},
+    value => {response = value;}), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(passwordReceived, "senha fictícia");
+  assert.equal(request.password, "");
+  assert.deepEqual(response, {ok: true, status: "UNLOCKED"});
 });

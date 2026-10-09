@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 
 test("query on opening and button click without scheduling periodic refresh", async () => {
   let click;
-  const elements = new Map(["#status", "#refresh", "#accounts", "#origin"].map(id => [id, {
+  const elements = new Map(["#status", "#refresh", "#accounts", "#origin", "#unlock-form", "#master-password", "#unlock"].map(id => [id, {
     textContent: "", disabled: false, children: [],
     replaceChildren() {this.children = [];}, append(item) {this.children.push(item);},
     addEventListener(event, callback) { if (event === "click") click = callback; }
   }]));
   globalThis.document = {querySelector: id => elements.get(id), createElement: () => ({textContent: "", addEventListener() {}, append() {}})};
+  globalThis.window = {addEventListener() {}};
   let scheduledIntervals = 0;
   const originalInterval = globalThis.setInterval;
   globalThis.setInterval = () => {scheduledIntervals++; return 0;};
