@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Cofre local", "version": "1.0.0",
+  "description": "Consulta o cofre local e lista contas autorizadas para a aba aberta.",
+  "permissions": ["nativeMessaging", "activeTab"],
+  "background": {"service_worker": "dist/service-worker.js", "type": "module"},
+  "action": {"default_popup": "popup.html"},
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'"}
+}

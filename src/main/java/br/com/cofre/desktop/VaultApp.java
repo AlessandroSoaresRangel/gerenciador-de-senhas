@@ -22,6 +22,7 @@ import java.util.concurrent.*;
 
 public class VaultApp extends Application {
     private VaultService vault;
+    private br.com.cofre.ipc.StatusServer statusServer;
     private Stage stage;
     private final VBox root = new VBox(14);
     private final Label message = new Label();
@@ -55,16 +56,17 @@ public class VaultApp extends Application {
                         ? Path.of(System.getProperty("user.home"), ".cofre-local", "vault.db")
                         : Path.of(custom);
         vault = new VaultService(path);
+        statusServer =
+                new br.com.cofre.ipc.StatusServer(
+                        path.toAbsolutePath().getParent().resolve("ipc/endpoint.json"),
+                        new br.com.cofre.nativehost.StatusProtocol(
+                                vault::status, vault::listMatches));
         root.setPadding(new Insets(24));
         Scene scene = new Scene(root, 900, 650);
         scene.addEventFilter(InputEvent.ANY, event -> activity = System.nanoTime());
         stage.setTitle("Cofre local");
         stage.setScene(scene);
-        stage.focusedProperty()
-                .addListener(
-                        (o, old, focused) -> {
-                            if (!focused) lock();
-                        });
+        // Alternar para o navegador deve manter a sessão disponível à extensão.
         stage.iconifiedProperty()
                 .addListener(
                         (o, old, minimized) -> {
@@ -136,9 +138,9 @@ public class VaultApp extends Application {
                                                 busy = false;
                                                 // Um resultado atrasado não pode reabrir a
                                                 // interface
-                                                // se houve bloqueio ou perda de foco durante o
+                                                // se houve bloqueio durante o
                                                 // cálculo.
-                                                if (request != generation || !stage.isFocused()) {
+                                                if (request != generation) {
                                                     vault.lock();
                                                     showLocked();
                                                     return;
@@ -297,7 +299,7 @@ public class VaultApp extends Application {
                 .addAll(
                         new HBox(20, heading, block),
                         new Label(
-                                "Bloqueio após 5 minutos, ao perder foco ou ao detectar interrupção"
+                                "Bloqueio após 5 minutos, ao minimizar ou ao detectar interrupção"
                                         + " da sessão."),
                         body,
                         message);
@@ -330,7 +332,7 @@ public class VaultApp extends Application {
 
     /**
      * A restauração começa com a sessão bloqueada e exige a senha do backup. A confirmação fica na
-     * própria tela, evitando diálogos que seriam interrompidos pelo bloqueio por foco.
+     * própria tela, deixando explícito que os dados atuais serão substituídos.
      */
     private void showRestore() {
         lock();
@@ -482,6 +484,7 @@ public class VaultApp extends Application {
 
     @Override
     public void stop() throws Exception {
+        if (statusServer != null) statusServer.close();
         generation++;
         timer.stop();
         worker.shutdownNow();

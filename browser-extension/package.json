@@ -1,0 +1,6 @@
+{
+  "name": "cofre-local-extension", "version": "1.0.0", "private": true,
+  "type": "module",
+  "scripts": {"build": "tsc", "test": "npm run build && node --test tests/*.test.mjs"},
+  "devDependencies": {"typescript": "5.7.3", "@types/chrome": "0.0.287"}
+}

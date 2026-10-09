@@ -1,6 +1,8 @@
 # Build e cache local do Maven
 target/
 .m2/
+node_modules/
+browser-extension/dist/
 *.class
 
 # Configurações locais de IDEs

@@ -58,6 +58,17 @@ class VaultAppTest {
                                         .toList();
                         passwords.get(0).setText("senha de teste longa");
                         passwords.get(1).setText("outra senha de teste");
+                        // Simula a transição de foco sem depender de qual janela o SO coloca à
+                        // frente.
+                        var setFocused =
+                                javafx.stage.Window.class.getDeclaredMethod(
+                                        "setFocused", boolean.class);
+                        setFocused.setAccessible(true);
+                        setFocused.invoke(stage, true);
+                        setFocused.invoke(stage, false);
+                        assertTrue(
+                                descendants(root).anyMatch(node -> node == passwords.get(0)),
+                                "Alternar para o navegador deve preservar a tela atual.");
                         button(root, "Criar cofre").fire();
                         assertTrue(hasLabel(root, "As senhas não coincidem."));
                         button(root, "Restaurar backup").fire();

@@ -3,6 +3,7 @@ package br.com.cofre.application;
 import br.com.cofre.backup.VaultBackupService;
 import br.com.cofre.crypto.CredentialCipher;
 import br.com.cofre.crypto.VaultCrypto;
+import br.com.cofre.domain.AccountMatch;
 import br.com.cofre.domain.Credential;
 import br.com.cofre.domain.VaultEntry;
 import br.com.cofre.storage.SqliteVaultRepository;
@@ -22,6 +23,21 @@ import java.util.UUID;
  * durante uma operação em outra thread. SQL e formato de backup ficam fora do serviço.
  */
 public final class VaultService implements AutoCloseable {
+    /** Normaliza a origem e aplica igualdade exata, retornando somente metadados de seleção. */
+    public synchronized List<AccountMatch> listMatches(String origin) throws Exception {
+        requireUnlocked();
+        String normalized = Credential.origin(origin);
+        return list().stream()
+                .filter(entry -> entry.credential().allowedOrigins().contains(normalized))
+                .map(
+                        entry ->
+                                new AccountMatch(
+                                        entry.id(),
+                                        entry.credential().title(),
+                                        entry.credential().username()))
+                .toList();
+    }
+
     private final VaultRepository repository;
     private final VaultBackupService backups;
     private final CredentialCipher credentialCipher = new CredentialCipher();
@@ -43,6 +59,16 @@ public final class VaultService implements AutoCloseable {
 
     public synchronized boolean unlocked() {
         return vaultKey != null;
+    }
+
+    /** Consulta atômica da sessão; não expõe chave, credenciais nem quantidade de registros. */
+    public synchronized String status() {
+        if (unlocked()) return "UNLOCKED";
+        try {
+            return exists() ? "LOCKED" : "NOT_CREATED";
+        } catch (SQLException failure) {
+            return "UNAVAILABLE";
+        }
     }
 
     /** Mantém a sessão protegida enquanto o serviço de backup exporta os dados. */
