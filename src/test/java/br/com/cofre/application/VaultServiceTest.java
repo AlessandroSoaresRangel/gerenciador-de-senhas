@@ -29,6 +29,21 @@ class VaultServiceTest {
     }
 
     @Test
+    void creationAcceptsMinimumLengthAndClearsPasswordOnRejection() throws Exception {
+        try (var vault = new VaultService(temp.resolve("minimum-length.db"))) {
+            char[] shortPassword = "12345678901".toCharArray();
+            assertThrows(IllegalArgumentException.class, () -> vault.create(shortPassword));
+            assertArrayEquals(new char[shortPassword.length], shortPassword);
+            assertFalse(vault.exists());
+
+            char[] minimumPassword = "123456789012".toCharArray();
+            vault.create(minimumPassword);
+            assertArrayEquals(new char[minimumPassword.length], minimumPassword);
+            assertTrue(vault.unlocked());
+        }
+    }
+
+    @Test
     void persistenceLockAndWrongPassword() throws Exception {
         Path file = temp.resolve("vault.db");
         String id;

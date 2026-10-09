@@ -1,6 +1,6 @@
-# Cofre local — etapas 1 a 4
+# Cofre local — etapas 1 a 5
 
-Aplicativo desktop Java/JavaFX: criação e desbloqueio com senha mestra, cadastro, edição, pesquisa, exclusão, bloqueio, backup e restauração do cofre. A extensão Chrome consulta a sessão e mostra as contas correspondentes ao site aberto pelo host Native Messaging. Implementa os itens 1 a 4 da ordem de implementação; preenchimento fica para as próximas etapas.
+Aplicativo desktop Java/JavaFX: criação e desbloqueio com senha mestra, cadastro, edição, pesquisa, exclusão, bloqueio, backup e restauração do cofre. A extensão Chrome consulta a sessão e mostra as contas correspondentes ao site aberto pelo host Native Messaging. Implementa os itens 1 a 5 da ordem de implementação, incluindo preenchimento de login mediante clique.
 
 ## Executar
 
@@ -49,13 +49,27 @@ O instalador compila o host, gera um executável com runtime Java em `%LOCALAPPD
 
 Com o cofre desbloqueado e um site HTTPS aberto, o popup lista título e usuário das contas que tenham aquela origem cadastrada. Por exemplo, para a página `https://conta.exemplo.com/login`, cadastre `https://conta.exemplo.com` na credencial. Subdomínios diferentes, portas não padrão e domínios semelhantes não correspondem. HTTP e páginas internas do navegador são recusados.
 
-A consulta usa `LIST_MATCHES` e devolve somente ID, título e usuário; não envia senha, notas ou todas as origens cadastradas. A origem vem da API de abas do navegador, com permissão temporária `activeTab` ao abrir a extensão. Se a aba navegar durante a consulta, a resposta é descartada. O popup consulta ao abrir e ao clicar em Atualizar, sem consultas periódicas. Os resultados refletem a última consulta; alterações na sessão são exibidas na próxima atualização. Se a consulta informar bloqueio, aplicativo fechado ou falha, a lista é removida. Não há preenchimento nem envio de formulários nesta etapa.
+A consulta usa `LIST_MATCHES` e devolve somente ID, título e usuário; não envia senha, notas ou todas as origens cadastradas. A origem vem da API de abas do navegador, com permissão temporária `activeTab` ao abrir a extensão. Se a aba navegar durante a consulta, a resposta é descartada. O popup consulta ao abrir e ao clicar em Atualizar, sem consultas periódicas. Os resultados refletem a última consulta; alterações na sessão são exibidas na próxima atualização. Se a consulta informar bloqueio, aplicativo fechado ou falha, a lista é removida. O botão **Preencher** de cada conta insere usuário e senha somente após seu clique. O envio do formulário fica a seu cargo.
 
-Ao atualizar da etapa 3: execute novamente `npm.cmd test` na pasta da extensão, recarregue a extensão em `chrome://extensions`, reexecute o instalador do host com o mesmo ID e reinicie o desktop. O executável anteriormente instalado não aceita o novo comando até ser atualizado.
+O preenchimento aceita um único formulário de login visível no documento principal, com um campo de usuário e um de senha. HTTP, iframes, formulários ambíguos, campos ocultos, campos `new-password` e formulários que enviam para outra origem são recusados. Formulários sem elemento `form`, Shadow DOM e login em múltiplas etapas ainda não são suportados. A permissão `scripting` executa a inspeção e o preenchimento no mundo isolado, usando o acesso temporário de `activeTab`.
+
+A liberação é vinculada à conta, origem e documento, com autorização de uso único válida por 10 segundos. Bloqueio, edição e exclusão invalidam autorizações pendentes. A extensão verifica novamente a aba e as referências do formulário antes de inserir os dados, sem salvar a senha nem devolvê-la ao popup. Uma senha já entregue ao documento não pode ser retirada pelo bloqueio posterior; após o preenchimento, o código do próprio site pode ler os campos.
+
+Ao atualizar de uma etapa anterior: execute novamente `npm.cmd test` na pasta da extensão, recarregue a extensão em `chrome://extensions`, reexecute o instalador do host com o mesmo ID e reinicie o desktop. O executável anteriormente instalado não aceita o novo comando até ser atualizado.
 
 Alternar para o navegador ou abrir o popup não bloqueia o cofre. O desbloqueio permanece exclusivamente na interface desktop. A inatividade é medida pelas interações no desktop: consultar o estado pela extensão não renova o prazo de 5 minutos.
 
-O host não abre outra sessão SQLite. Ele consulta a sessão desktop por loopback autenticado, com token aleatório em um arquivo restrito ao dono por ACL do Windows (ou permissões POSIX). O arquivo de descoberta é apagado ao fechar o desktop, e um lock impede duas sessões na mesma pasta. Não há servidor acessível pela rede externa, acesso permanente a sites, content script ou credenciais persistidas na extensão. O protocolo aceita `GET_STATUS` e `LIST_MATCHES`, com versão e ID de correlação; mensagens inválidas são rejeitadas e os frames são limitados a 64 KiB.
+O host não abre outra sessão SQLite. Ele consulta a sessão desktop por loopback autenticado, com token aleatório em um arquivo restrito ao dono por ACL do Windows (ou permissões POSIX). O arquivo de descoberta é apagado ao fechar o desktop, e um lock impede duas sessões na mesma pasta. Não há servidor acessível pela rede externa nem senhas persistidas na extensão. O protocolo aceita `GET_STATUS`, `LIST_MATCHES`, `REQUEST_FILL`, `REQUEST_AUTOMATIC_FILL` e `CONFIRM_FILL`, com versão e ID de correlação; mensagens inválidas são rejeitadas e os frames são limitados a 64 KiB.
+
+### Preenchimento automático por site
+
+1. No desktop, edite a conta, marque **Permitir preenchimento automático nas origens cadastradas** e salve.
+2. Na extensão, clique em **Usar automaticamente neste site** na conta desejada e conceda o acesso solicitado pelo Chrome.
+3. Com o cofre desbloqueado, o login será preenchido quando a aba ativa terminar de carregar ou for ativada. O formulário nunca é enviado automaticamente.
+
+A extensão guarda somente a origem exata e o identificador da conta escolhida. Há uma conta automática por origem; escolher outra substitui a anterior. A permissão opcional usa o host HTTPS conforme a [API de permissões do Chrome](https://developer.chrome.com/docs/extensions/reference/api/permissions); a regra do cofre e a escolha da extensão distinguem também subdomínios e portas. O automático preserva campos já preenchidos e reutiliza as verificações de documento, formulário, expiração e bloqueio do preenchimento por clique.
+
+Use **Desativar automático neste site** para apagar a escolha, ou desmarque a opção no desktop para impedir novas autorizações daquela credencial. Revogar o acesso ao site nas configurações do Chrome também impede o automático. Formulários inseridos depois do carregamento podem ser preenchidos por clique ou ao reativar a aba. Depois de atualizar a extensão, recarregue-a em `chrome://extensions` para aplicar as novas permissões.
 
 O caminho de descoberta padrão é `%USERPROFILE%\.cofre-local\ipc\endpoint.json`. A extensão instalada consulta somente o cofre padrão; cofres iniciados com `vault.path` personalizado mantêm uma descoberta separada para testes. O instalador desta etapa é específico para Chrome no Windows.
 
@@ -92,7 +106,7 @@ O código é separado por responsabilidade, em um único projeto Maven:
 | `backup` | Formato versionado, validação e leitura/escrita de backups |
 | `storage` | Contrato `VaultRepository`, implementação SQLite e transações |
 | `desktop` | Interface JavaFX |
-| `nativehost` | Framing binário, validação de `GET_STATUS` e processo iniciado pelo Chrome |
+| `nativehost` | Framing binário, validação de mensagens e processo iniciado pelo Chrome |
 | `ipc` | Descoberta privada e consulta autenticada da sessão desktop |
 
 `VaultService` recebe um `VaultRepository` por construtor e delega o backup ao `VaultBackupService`. O repositório recebe somente registros criptografados; não conhece a senha mestra nem o formato de backup. A interface continua usando o serviço para que o bloqueio seja sincronizado com as operações. O esquema SQLite e o formato de backup da versão 1 foram preservados.

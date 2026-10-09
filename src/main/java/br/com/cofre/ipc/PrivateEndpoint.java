@@ -16,8 +16,9 @@ public final class PrivateEndpoint {
                             .setType(AclEntryType.ALLOW)
                             .setPrincipal(Files.getOwner(path))
                             .setPermissions(EnumSet.allOf(AclEntryPermission.class));
-            if (Files.isDirectory(path))
+            if (Files.isDirectory(path)) {
                 entry.setFlags(AclEntryFlag.FILE_INHERIT, AclEntryFlag.DIRECTORY_INHERIT);
+            }
             acl.setAcl(List.of(entry.build()));
         } else if (Files.getFileAttributeView(path, PosixFileAttributeView.class) != null) {
             Files.setPosixFilePermissions(

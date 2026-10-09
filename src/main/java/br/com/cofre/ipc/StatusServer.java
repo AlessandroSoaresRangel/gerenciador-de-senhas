@@ -14,6 +14,7 @@ import java.util.*;
 
 /** Ponte de status da sessão desktop, limitada ao loopback e autenticada por token efêmero. */
 public final class StatusServer implements AutoCloseable {
+    private static final int REQUEST_TIMEOUT_MILLIS = 2000;
     private final Path endpoint;
     private final ServerSocket server;
     private final FileChannel lockChannel;
@@ -65,17 +66,22 @@ public final class StatusServer implements AutoCloseable {
         thread.start();
     }
 
+    /** Trata cada conexão isoladamente; um pedido inválido não encerra o servidor. */
     private void serve() {
         while (!closed) {
             try (Socket socket = server.accept()) {
-                socket.setSoTimeout(2000);
+                socket.setSoTimeout(REQUEST_TIMEOUT_MILLIS);
                 byte[] input = frames.read(socket.getInputStream());
-                if (input == null) continue;
+                if (input == null) {
+                    continue;
+                }
                 var request = json.readTree(input);
                 String supplied = request.path("token").asText();
                 if (!MessageDigest.isEqual(
                         token.getBytes(StandardCharsets.UTF_8),
-                        supplied.getBytes(StandardCharsets.UTF_8))) continue;
+                        supplied.getBytes(StandardCharsets.UTF_8))) {
+                    continue;
+                }
                 byte[] response = protocol.handle(json.writeValueAsBytes(request.get("request")));
                 frames.write(socket.getOutputStream(), response);
             } catch (Exception ignored) {

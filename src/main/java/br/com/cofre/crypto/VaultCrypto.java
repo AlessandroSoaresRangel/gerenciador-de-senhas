@@ -12,7 +12,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 public final class VaultCrypto {
-    public static final int MEMORY = 65_536; // KiB: 64 MiB para o Argon2id.
+    public static final int MEMORY_KIBIBYTES = 65_536; // KiB: 64 MiB para o Argon2id.
     public static final int ITERATIONS = 3;
     public static final int PARALLELISM = 1;
     public static final int SALT_LENGTH_BYTES = 16;
@@ -38,14 +38,14 @@ public final class VaultCrypto {
 
     /** Deriva a chave que protege a chave do cofre, sem armazenar a senha mestra. */
     public static byte[] derive(
-            char[] password, byte[] salt, int memory, int iterations, int parallelism) {
-        validateDerivationParameters(salt, memory, iterations, parallelism);
+            char[] password, byte[] salt, int memoryKibibytes, int iterations, int parallelism) {
+        validateDerivationParameters(salt, memoryKibibytes, iterations, parallelism);
 
         Argon2Parameters parameters =
                 new Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
                         .withVersion(Argon2Parameters.ARGON2_VERSION_13)
                         .withSalt(salt)
-                        .withMemoryAsKB(memory)
+                        .withMemoryAsKB(memoryKibibytes)
                         .withIterations(iterations)
                         .withParallelism(parallelism)
                         .build();
@@ -63,10 +63,10 @@ public final class VaultCrypto {
     }
 
     private static void validateDerivationParameters(
-            byte[] salt, int memory, int iterations, int parallelism) {
+            byte[] salt, int memoryKibibytes, int iterations, int parallelism) {
         boolean supported =
                 salt.length == SALT_LENGTH_BYTES
-                        && memory == MEMORY
+                        && memoryKibibytes == MEMORY_KIBIBYTES
                         && iterations == ITERATIONS
                         && parallelism == PARALLELISM;
 

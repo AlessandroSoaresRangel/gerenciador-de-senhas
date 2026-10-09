@@ -8,7 +8,7 @@ test("query on opening and button click without scheduling periodic refresh", as
     replaceChildren() {this.children = [];}, append(item) {this.children.push(item);},
     addEventListener(event, callback) { if (event === "click") click = callback; }
   }]));
-  globalThis.document = {querySelector: id => elements.get(id), createElement: () => ({textContent: ""})};
+  globalThis.document = {querySelector: id => elements.get(id), createElement: () => ({textContent: "", addEventListener() {}, append() {}})};
   let scheduledIntervals = 0;
   const originalInterval = globalThis.setInterval;
   globalThis.setInterval = () => {scheduledIntervals++; return 0;};
@@ -25,7 +25,7 @@ test("query on opening and button click without scheduling periodic refresh", as
     await import("../dist/popup.js");
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(scheduledIntervals, 0);
-    assert.equal(elements.get("#accounts").children.length, 1);
+    assert.equal(elements.get("#accounts").children.length, 2);
     pending = true;
     click();
     assert.equal(elements.get("#refresh").disabled, true);

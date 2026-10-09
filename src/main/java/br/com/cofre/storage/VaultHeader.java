@@ -8,4 +8,7 @@ public record VaultHeader(
         int iterations,
         int parallelism,
         byte[] nonce,
-        byte[] wrappedKey) {}
+        byte[] wrappedKey) {
+    public static final int FORMAT_VERSION = 1;
+    public static final String KEY_AUTHENTICATION_CONTEXT = "vault-key:" + FORMAT_VERSION;
+}

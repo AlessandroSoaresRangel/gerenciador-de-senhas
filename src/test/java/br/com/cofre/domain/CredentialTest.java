@@ -50,7 +50,7 @@ class CredentialTest {
     }
 
     @Test
-    void rejectMissingRequiredFieldsAndUnsupportedAutofill() {
+    void rejectMissingRequiredFieldsAndSupportAutofill() {
         for (String title : new String[] {null, "", "   "}) {
             assertThrows(
                     IllegalArgumentException.class,
@@ -70,8 +70,6 @@ class CredentialTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new Credential("Conta", "", "senha", List.of(), false, null));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new Credential("Conta", "", "senha", List.of(), true, ""));
+        assertTrue(new Credential("Conta", "", "senha", List.of(), true, "").autofillEnabled());
     }
 }

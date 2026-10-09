@@ -8,6 +8,17 @@ import java.util.List;
 
 /** Responsável apenas pelo esquema SQLite, consultas e transações. */
 public final class SqliteVaultRepository implements VaultRepository {
+    private static final int BUSY_TIMEOUT_MILLIS = 5000;
+    private static final String INSERT_ITEM_SQL = """
+            INSERT INTO vault_item (id, version, nonce, ciphertext)
+            VALUES (?, ?, ?, ?)
+            """;
+    private static final String UPSERT_ITEM_SQL = INSERT_ITEM_SQL + """
+            ON CONFLICT(id) DO UPDATE SET
+                version = excluded.version,
+                nonce = excluded.nonce,
+                ciphertext = excluded.ciphertext
+            """;
     private final Connection connection;
 
     public SqliteVaultRepository(Path path) throws Exception {
@@ -15,7 +26,7 @@ public final class SqliteVaultRepository implements VaultRepository {
         Files.createDirectories(absolute.getParent());
         connection = DriverManager.getConnection("jdbc:sqlite:" + absolute);
         try (Statement statement = connection.createStatement()) {
-            statement.execute("PRAGMA busy_timeout=5000");
+            statement.execute("PRAGMA busy_timeout=" + BUSY_TIMEOUT_MILLIS);
             statement.execute(
                     """
                     CREATE TABLE IF NOT EXISTS vault_header (
@@ -56,7 +67,9 @@ public final class SqliteVaultRepository implements VaultRepository {
     public VaultHeader readHeader() throws SQLException {
         try (Statement statement = connection.createStatement();
                 ResultSet row = statement.executeQuery("SELECT * FROM vault_header WHERE id=1")) {
-            if (!row.next()) throw new IllegalStateException("Cofre ausente.");
+            if (!row.next()) {
+                throw new IllegalStateException("Cofre ausente.");
+            }
             return new VaultHeader(
                     row.getInt("version"),
                     row.getBytes("salt"),
@@ -71,7 +84,11 @@ public final class SqliteVaultRepository implements VaultRepository {
     @Override
     public void insertHeader(VaultHeader header) throws SQLException {
         try (PreparedStatement statement =
-                connection.prepareStatement("INSERT INTO vault_header VALUES(1,?,?,?,?,?,?,?)")) {
+                connection.prepareStatement("""
+                        INSERT INTO vault_header
+                            (id, version, salt, memory, iterations, parallelism, nonce, wrapped_key)
+                        VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                        """)) {
             statement.setInt(1, header.version());
             statement.setBytes(2, header.salt());
             statement.setInt(3, header.memory());
@@ -88,13 +105,14 @@ public final class SqliteVaultRepository implements VaultRepository {
         List<EncryptedItem> items = new ArrayList<>();
         try (Statement statement = connection.createStatement();
                 ResultSet row = statement.executeQuery("SELECT * FROM vault_item")) {
-            while (row.next())
+            while (row.next()) {
                 items.add(
                         new EncryptedItem(
                                 row.getString("id"),
                                 row.getInt("version"),
                                 row.getBytes("nonce"),
                                 row.getBytes("ciphertext")));
+            }
         }
         return items;
     }
@@ -105,11 +123,7 @@ public final class SqliteVaultRepository implements VaultRepository {
     }
 
     private void writeItem(EncryptedItem item, boolean updateExisting) throws SQLException {
-        String sql = "INSERT INTO vault_item VALUES(?,?,?,?)";
-        if (updateExisting)
-            sql +=
-                    " ON CONFLICT(id) DO UPDATE SET version=excluded.version,"
-                        + " nonce=excluded.nonce,ciphertext=excluded.ciphertext";
+        String sql = updateExisting ? UPSERT_ITEM_SQL : INSERT_ITEM_SQL;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, item.id());
             statement.setInt(2, item.version());
@@ -138,7 +152,9 @@ public final class SqliteVaultRepository implements VaultRepository {
                 statement.executeUpdate("DELETE FROM vault_header");
             }
             insertHeader(snapshot.header());
-            for (EncryptedItem item : snapshot.items()) writeItem(item, false);
+            for (EncryptedItem item : snapshot.items()) {
+                writeItem(item, false);
+            }
             connection.commit();
         } catch (SQLException | RuntimeException failure) {
             connection.rollback();

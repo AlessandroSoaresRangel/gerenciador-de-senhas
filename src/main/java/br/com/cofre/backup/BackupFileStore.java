@@ -4,9 +4,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /** Cuida dos limites de arquivo e da publicação de backups completos, sem sobrescrever dados. */
-public final class BackupFileStore {
+public final class BackupFileStore implements BackupFiles {
     private static final int MAX_BACKUP_BYTES = 64 * 1024 * 1024;
 
+    @Override
     public byte[] read(Path source) throws Exception {
         validateSize(Files.size(source));
         byte[] contents;
@@ -18,6 +19,7 @@ public final class BackupFileStore {
         return contents;
     }
 
+    @Override
     public void validateDestination(Path destination) {
         if (Files.isDirectory(destination)) {
             throw new IllegalArgumentException(
@@ -26,6 +28,7 @@ public final class BackupFileStore {
         }
     }
 
+    @Override
     public void write(Path destination, byte[] contents) throws Exception {
         validateDestination(destination);
         validateSize(contents.length);
@@ -40,7 +43,8 @@ public final class BackupFileStore {
     }
 
     private void validateSize(long size) {
-        if (size > MAX_BACKUP_BYTES)
+        if (size > MAX_BACKUP_BYTES) {
             throw new IllegalArgumentException("Backup excede o limite de 64 MiB.");
+        }
     }
 }

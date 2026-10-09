@@ -1,10 +1,13 @@
 package br.com.cofre.application;
 
 import br.com.cofre.backup.VaultBackupService;
+import br.com.cofre.backup.VaultBackups;
 import br.com.cofre.crypto.CredentialCipher;
+import br.com.cofre.crypto.CredentialEncryption;
 import br.com.cofre.crypto.VaultCrypto;
 import br.com.cofre.domain.AccountMatch;
 import br.com.cofre.domain.Credential;
+import br.com.cofre.domain.FillCredential;
 import br.com.cofre.domain.VaultEntry;
 import br.com.cofre.storage.SqliteVaultRepository;
 import br.com.cofre.storage.VaultHeader;
@@ -12,10 +15,12 @@ import br.com.cofre.storage.VaultRepository;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -23,6 +28,35 @@ import java.util.UUID;
  * durante uma operação em outra thread. SQL e formato de backup ficam fora do serviço.
  */
 public final class VaultService implements AutoCloseable {
+    public static final int MIN_MASTER_PASSWORD_LENGTH_CHARACTERS = 12;
+    private static final int MAX_DOCUMENT_IDENTIFIER_LENGTH = 200;
+
+    private final VaultRepository repository;
+    private final VaultBackups backups;
+    private final CredentialEncryption credentialCipher;
+    private final FillAuthorizations fillAuthorizations;
+    private byte[] vaultKey;
+
+    public VaultService(Path path) throws Exception {
+        this(new SqliteVaultRepository(path), new VaultBackupService());
+    }
+
+    public VaultService(VaultRepository repository, VaultBackups backups) {
+        this(repository, backups, new CredentialCipher(), new FillAuthorizations(Clock.systemUTC()));
+    }
+
+    /** Injeta as fronteiras e as autorizações para permitir testes com tempo controlado. */
+    public VaultService(
+            VaultRepository repository,
+            VaultBackups backups,
+            CredentialEncryption credentialCipher,
+            FillAuthorizations fillAuthorizations) {
+        this.repository = Objects.requireNonNull(repository);
+        this.backups = Objects.requireNonNull(backups);
+        this.credentialCipher = Objects.requireNonNull(credentialCipher);
+        this.fillAuthorizations = Objects.requireNonNull(fillAuthorizations);
+    }
+
     /** Normaliza a origem e aplica igualdade exata, retornando somente metadados de seleção. */
     public synchronized List<AccountMatch> listMatches(String origin) throws Exception {
         requireUnlocked();
@@ -38,19 +72,46 @@ public final class VaultService implements AutoCloseable {
                 .toList();
     }
 
-    private final VaultRepository repository;
-    private final VaultBackupService backups;
-    private final CredentialCipher credentialCipher = new CredentialCipher();
-    private byte[] vaultKey;
-
-    public VaultService(Path path) throws Exception {
-        this(new SqliteVaultRepository(path), new VaultBackupService());
+    /** Libera somente a conta autorizada, vinculada a uma operação curta no documento. */
+    public synchronized FillCredential requestFill(
+            String origin, String accountId, String document) throws Exception {
+        return requestFill(origin, accountId, document, false);
     }
 
-    /** Recebe suas dependências para permitir outras implementações de persistência. */
-    public VaultService(VaultRepository repository, VaultBackupService backups) {
-        this.repository = java.util.Objects.requireNonNull(repository);
-        this.backups = java.util.Objects.requireNonNull(backups);
+    public synchronized FillCredential requestAutomaticFill(
+            String origin, String accountId, String document) throws Exception {
+        return requestFill(origin, accountId, document, true);
+    }
+
+    private FillCredential requestFill(
+            String origin, String accountId, String document, boolean automatic) throws Exception {
+        requireUnlocked();
+        String normalized = Credential.origin(origin);
+        if (document == null
+                || document.isBlank()
+                || document.length() > MAX_DOCUMENT_IDENTIFIER_LENGTH) {
+            throw new IllegalArgumentException("Documento inválido.");
+        }
+        VaultEntry entry =
+                list().stream()
+                        .filter(item -> item.id().equals(accountId)
+                                && item.credential().allowedOrigins().contains(normalized)
+                                && (!automatic || item.credential().autofillEnabled()))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Conta não autorizada para esta origem."));
+        FillAuthorizations.Ticket ticket = fillAuthorizations.issue(normalized, accountId, document);
+        return new FillCredential(
+                ticket.token(),
+                ticket.expiresAt(),
+                entry.credential().username(),
+                entry.credential().password());
+    }
+
+    /** Consome a autorização; bloqueio, edição e exclusão invalidam os pedidos pendentes. */
+    public synchronized void confirmFill(String token, String origin, String accountId, String document) {
+        requireUnlocked();
+        fillAuthorizations.consume(token, Credential.origin(origin), accountId, document);
     }
 
     public synchronized boolean exists() throws SQLException {
@@ -63,7 +124,9 @@ public final class VaultService implements AutoCloseable {
 
     /** Consulta atômica da sessão; não expõe chave, credenciais nem quantidade de registros. */
     public synchronized String status() {
-        if (unlocked()) return "UNLOCKED";
+        if (unlocked()) {
+            return "UNLOCKED";
+        }
         try {
             return exists() ? "LOCKED" : "NOT_CREATED";
         } catch (SQLException failure) {
@@ -91,24 +154,30 @@ public final class VaultService implements AutoCloseable {
         byte[] wrappingKey = null;
         byte[] candidateKey = null;
         try {
-            if (exists()) throw new IllegalStateException("O cofre já existe.");
-            if (password.length < 12)
-                throw new IllegalArgumentException("Use pelo menos 12 caracteres na senha mestra.");
+            if (exists()) {
+                throw new IllegalStateException("O cofre já existe.");
+            }
+            if (password.length < MIN_MASTER_PASSWORD_LENGTH_CHARACTERS) {
+                throw new IllegalArgumentException(
+                        "Use pelo menos " + MIN_MASTER_PASSWORD_LENGTH_CHARACTERS
+                                + " caracteres na senha mestra.");
+            }
             byte[] salt = VaultCrypto.random(VaultCrypto.SALT_LENGTH_BYTES);
             candidateKey = VaultCrypto.random(VaultCrypto.KEY_LENGTH_BYTES);
             wrappingKey =
                     VaultCrypto.derive(
                             password,
                             salt,
-                            VaultCrypto.MEMORY,
+                            VaultCrypto.MEMORY_KIBIBYTES,
                             VaultCrypto.ITERATIONS,
                             VaultCrypto.PARALLELISM);
-            var encrypted = VaultCrypto.encrypt(wrappingKey, candidateKey, "vault-key:1");
+            var encrypted =
+                    VaultCrypto.encrypt(wrappingKey, candidateKey, VaultHeader.KEY_AUTHENTICATION_CONTEXT);
             repository.insertHeader(
                     new VaultHeader(
-                            1,
+                            VaultHeader.FORMAT_VERSION,
                             salt,
-                            VaultCrypto.MEMORY,
+                            VaultCrypto.MEMORY_KIBIBYTES,
                             VaultCrypto.ITERATIONS,
                             VaultCrypto.PARALLELISM,
                             encrypted.nonce(),
@@ -134,8 +203,9 @@ public final class VaultService implements AutoCloseable {
         byte[] candidateKey = null;
         try {
             VaultHeader header = repository.readHeader();
-            if (header.version() != 1)
+            if (header.version() != VaultHeader.FORMAT_VERSION) {
                 throw new IllegalStateException("Cofre ausente ou formato não suportado.");
+            }
             wrappingKey =
                     VaultCrypto.derive(
                             password,
@@ -145,9 +215,10 @@ public final class VaultService implements AutoCloseable {
                             header.parallelism());
             candidateKey =
                     VaultCrypto.decrypt(
-                            wrappingKey, header.nonce(), header.wrappedKey(), "vault-key:1");
-            if (candidateKey.length != VaultCrypto.KEY_LENGTH_BYTES)
+                            wrappingKey, header.nonce(), header.wrappedKey(), VaultHeader.KEY_AUTHENTICATION_CONTEXT);
+            if (candidateKey.length != VaultCrypto.KEY_LENGTH_BYTES) {
                 throw new IllegalStateException("Chave inválida.");
+            }
             vaultKey = candidateKey;
             candidateKey = null;
         } finally {
@@ -162,8 +233,9 @@ public final class VaultService implements AutoCloseable {
         requireUnlocked();
         List<VaultEntry> entries = new ArrayList<>();
         try {
-            for (var item : repository.readItems())
+            for (var item : repository.readItems()) {
                 entries.add(credentialCipher.decrypt(item, vaultKey));
+            }
         } catch (Exception failure) {
             lock();
             throw failure;
@@ -176,6 +248,7 @@ public final class VaultService implements AutoCloseable {
 
     public synchronized String save(String id, Credential credential) throws Exception {
         requireUnlocked();
+        fillAuthorizations.clear();
         String itemId = id == null ? UUID.randomUUID().toString() : id;
         repository.saveItem(credentialCipher.encrypt(new VaultEntry(itemId, credential), vaultKey));
         return itemId;
@@ -183,21 +256,27 @@ public final class VaultService implements AutoCloseable {
 
     public synchronized void delete(String id) throws SQLException {
         requireUnlocked();
+        fillAuthorizations.clear();
         repository.deleteItem(id);
     }
 
     public synchronized void lock() {
+        fillAuthorizations.clear();
         wipe(vaultKey);
         vaultKey = null;
     }
 
     private void requireUnlocked() {
-        if (vaultKey == null) throw new IllegalStateException("Desbloqueie o cofre primeiro.");
+        if (vaultKey == null) {
+            throw new IllegalStateException("Desbloqueie o cofre primeiro.");
+        }
     }
 
     // Limpa buffers sob nosso controle; cópias internas da JVM não têm apagamento garantido.
     private static void wipe(byte[] bytes) {
-        if (bytes != null) Arrays.fill(bytes, (byte) 0);
+        if (bytes != null) {
+            Arrays.fill(bytes, (byte) 0);
+        }
     }
 
     @Override

@@ -13,7 +13,7 @@ class VaultCryptoTest {
         return VaultCrypto.derive(
                 password.toCharArray(),
                 salt,
-                VaultCrypto.MEMORY,
+                VaultCrypto.MEMORY_KIBIBYTES,
                 VaultCrypto.ITERATIONS,
                 VaultCrypto.PARALLELISM);
     }
@@ -49,7 +49,7 @@ class VaultCryptoTest {
                         VaultCrypto.derive(
                                 "teste".toCharArray(),
                                 salt,
-                                VaultCrypto.MEMORY,
+                                VaultCrypto.MEMORY_KIBIBYTES,
                                 1,
                                 VaultCrypto.PARALLELISM));
         assertThrows(
@@ -58,7 +58,7 @@ class VaultCryptoTest {
                         VaultCrypto.derive(
                                 "teste".toCharArray(),
                                 salt,
-                                VaultCrypto.MEMORY,
+                                VaultCrypto.MEMORY_KIBIBYTES,
                                 VaultCrypto.ITERATIONS,
                                 2));
     }

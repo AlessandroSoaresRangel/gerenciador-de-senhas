@@ -6,10 +6,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
 import java.util.function.Supplier;
 
-/** Aceita estado e metadados de contas; nenhum comando libera senhas ou notas. */
+/** Valida a versão/correlação e encaminha as operações aos responsáveis por cada comando. */
 public final class StatusProtocol {
+    public static final int PROTOCOL_VERSION = 1;
+    private static final int MAX_REQUEST_IDENTIFIER_LENGTH = 64;
+    private static final int STATUS_REQUEST_FIELD_COUNT = 3;
+    private static final int MATCHES_REQUEST_FIELD_COUNT = 4;
     private final Supplier<String> status;
     private final AccountQuery accounts;
+    private final FillProtocol fill;
     private final ObjectMapper json = new ObjectMapper();
 
     public StatusProtocol(Supplier<String> status) {
@@ -21,8 +26,13 @@ public final class StatusProtocol {
     }
 
     public StatusProtocol(Supplier<String> status, AccountQuery accounts) {
+        this(status, accounts, new FillProtocol(null));
+    }
+
+    public StatusProtocol(Supplier<String> status, AccountQuery accounts, FillProtocol fill) {
         this.status = status;
         this.accounts = accounts;
+        this.fill = fill;
     }
 
     public byte[] handle(byte[] input) throws Exception {
@@ -32,17 +42,25 @@ public final class StatusProtocol {
         } catch (Exception failure) {
             return error("");
         }
-        if (request == null) return error("");
+        if (request == null) {
+            return error("");
+        }
         String id = request.path("requestId").asText();
         if (!request.isObject()
                 || !request.path("version").isInt()
-                || request.path("version").asInt() != 1
+                || request.path("version").asInt() != PROTOCOL_VERSION
                 || !request.path("requestId").isTextual()
                 || id.isBlank()
-                || id.length() > 64) return error("");
+                || id.length() > MAX_REQUEST_IDENTIFIER_LENGTH) {
+            return error("");
+        }
         String command = request.path("command").asText();
+        if ("REQUEST_FILL".equals(command) || "REQUEST_AUTOMATIC_FILL".equals(command)
+                || "CONFIRM_FILL".equals(command)) {
+            return fill.handle(request, id);
+        }
         if ("LIST_MATCHES".equals(command)
-                && request.size() == 4
+                && request.size() == MATCHES_REQUEST_FIELD_COUNT
                 && request.path("origin").isTextual()) {
             String origin;
             try {
@@ -54,7 +72,7 @@ public final class StatusProtocol {
                 return json.writeValueAsBytes(
                         Map.of(
                                 "version",
-                                1,
+                                PROTOCOL_VERSION,
                                 "requestId",
                                 id,
                                 "ok",
@@ -67,7 +85,7 @@ public final class StatusProtocol {
                 return json.writeValueAsBytes(
                         Map.of(
                                 "version",
-                                1,
+                                PROTOCOL_VERSION,
                                 "requestId",
                                 id,
                                 "ok",
@@ -76,16 +94,18 @@ public final class StatusProtocol {
                                 "VAULT_LOCKED"));
             } catch (Exception failure) {
                 return json.writeValueAsBytes(
-                        Map.of("version", 1, "requestId", id, "ok", false, "error", "UNAVAILABLE"));
+                        Map.of("version", PROTOCOL_VERSION, "requestId", id, "ok", false, "error", "UNAVAILABLE"));
             }
         }
-        if (!"GET_STATUS".equals(command) || request.size() != 3) return error(id);
+        if (!"GET_STATUS".equals(command) || request.size() != STATUS_REQUEST_FIELD_COUNT) {
+            return error(id);
+        }
         return json.writeValueAsBytes(
-                Map.of("version", 1, "requestId", id, "ok", true, "status", status.get()));
+                Map.of("version", PROTOCOL_VERSION, "requestId", id, "ok", true, "status", status.get()));
     }
 
     private byte[] error(String id) throws Exception {
         return json.writeValueAsBytes(
-                Map.of("version", 1, "requestId", id, "ok", false, "error", "INVALID_REQUEST"));
+                Map.of("version", PROTOCOL_VERSION, "requestId", id, "ok", false, "error", "INVALID_REQUEST"));
     }
 }

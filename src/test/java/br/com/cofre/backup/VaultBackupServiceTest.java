@@ -13,11 +13,37 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
 class VaultBackupServiceTest {
     @TempDir Path directory;
+
+    @Test
+    void injectedFileFailureClearsPasswordAndPreservesFailure() {
+        var readFailure = new IOException("Falha fictícia de leitura.");
+        BackupFiles unavailableFiles = new BackupFiles() {
+            @Override
+            public byte[] read(Path source) throws IOException {
+                throw readFailure;
+            }
+
+            @Override
+            public void validateDestination(Path destination) {}
+
+            @Override
+            public void write(Path destination, byte[] contents) {
+                fail("Uma leitura não deve gravar arquivos.");
+            }
+        };
+        var backups = new VaultBackupService(unavailableFiles, new CredentialCipher());
+        char[] password = "senha fictícia de backup".toCharArray();
+
+        assertSame(readFailure,
+                assertThrows(IOException.class, () -> backups.read(directory.resolve("absent.cofre"), password)));
+        assertArrayEquals(new char[password.length], password);
+    }
 
     @Test
     void readVersionOneFormatWithoutDependingOnCurrentExporter() throws Exception {
@@ -28,7 +54,7 @@ class VaultBackupServiceTest {
                 VaultCrypto.derive(
                         password,
                         salt,
-                        VaultCrypto.MEMORY,
+                        VaultCrypto.MEMORY_KIBIBYTES,
                         VaultCrypto.ITERATIONS,
                         VaultCrypto.PARALLELISM);
         var wrapped = VaultCrypto.encrypt(wrappingKey, key, "vault-key:1");

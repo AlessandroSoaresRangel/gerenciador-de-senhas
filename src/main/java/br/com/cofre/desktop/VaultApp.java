@@ -3,6 +3,9 @@ package br.com.cofre.desktop;
 import br.com.cofre.application.VaultService;
 import br.com.cofre.domain.Credential;
 import br.com.cofre.domain.VaultEntry;
+import br.com.cofre.ipc.StatusServer;
+import br.com.cofre.nativehost.FillProtocol;
+import br.com.cofre.nativehost.StatusProtocol;
 
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -21,35 +24,48 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class VaultApp extends Application {
+    private static final int ROOT_SPACING_PIXELS = 14;
+    private static final int CONTROL_SPACING_PIXELS = 10;
+    private static final int SECTION_SPACING_PIXELS = 20;
+    private static final int WINDOW_PADDING_PIXELS = 24;
+    private static final int WINDOW_WIDTH_PIXELS = 900;
+    private static final int WINDOW_HEIGHT_PIXELS = 650;
+    private static final int ENTRY_LIST_WIDTH_PIXELS = 330;
+    private static final int NOTES_VISIBLE_ROWS = 4;
+    private static final int SESSION_CHECK_INTERVAL_SECONDS = 1;
+    private static final int MAX_TIMER_PAUSE_SECONDS = 10;
+    private static final int INACTIVITY_TIMEOUT_MINUTES = 5;
+    private static final String HEADING_STYLE = "-fx-font-size: 26px; -fx-font-weight: bold;";
+
     private VaultService vault;
-    private br.com.cofre.ipc.StatusServer statusServer;
-    private Stage stage;
-    private final VBox root = new VBox(14);
+    private StatusServer statusServer;
+    private final VBox root = new VBox(ROOT_SPACING_PIXELS);
     private final Label message = new Label();
     private final ExecutorService worker =
             Executors.newSingleThreadExecutor(
-                    r -> {
-                        Thread t = new Thread(r, "vault-kdf");
-                        t.setDaemon(true);
-                        return t;
+                    operation -> {
+                        Thread workerThread = new Thread(operation, "vault-kdf");
+                        workerThread.setDaemon(true);
+                        return workerThread;
                     });
     private Timeline timer;
-    private long activity = System.nanoTime(), tick = activity;
+    private long lastActivityNanos = System.nanoTime();
+    private long lastTickNanos = lastActivityNanos;
     private int generation;
     private boolean busy;
     private boolean listenersBound;
     private final ListView<VaultEntry> items = new ListView<>();
-    private final TextField title = new TextField(),
-            username = new TextField(),
-            origins = new TextField(),
-            search = new TextField();
+    private final TextField title = new TextField();
+    private final TextField username = new TextField();
+    private final TextField origins = new TextField();
+    private final CheckBox autofill = new CheckBox("Permitir preenchimento automático nas origens cadastradas");
+    private final TextField search = new TextField();
     private final PasswordField password = new PasswordField();
     private final TextArea notes = new TextArea();
     private String editing;
 
     @Override
     public void start(Stage stage) throws Exception {
-        this.stage = stage;
         String custom = System.getProperty("vault.path");
         Path path =
                 custom == null
@@ -57,38 +73,44 @@ public class VaultApp extends Application {
                         : Path.of(custom);
         vault = new VaultService(path);
         statusServer =
-                new br.com.cofre.ipc.StatusServer(
+                new StatusServer(
                         path.toAbsolutePath().getParent().resolve("ipc/endpoint.json"),
-                        new br.com.cofre.nativehost.StatusProtocol(
-                                vault::status, vault::listMatches));
-        root.setPadding(new Insets(24));
-        Scene scene = new Scene(root, 900, 650);
-        scene.addEventFilter(InputEvent.ANY, event -> activity = System.nanoTime());
+                        new StatusProtocol(vault::status, vault::listMatches, new FillProtocol(vault)));
+        root.setPadding(new Insets(WINDOW_PADDING_PIXELS));
+        Scene scene = new Scene(root, WINDOW_WIDTH_PIXELS, WINDOW_HEIGHT_PIXELS);
+        scene.addEventFilter(InputEvent.ANY, event -> lastActivityNanos = System.nanoTime());
         stage.setTitle("Cofre local");
         stage.setScene(scene);
         // Alternar para o navegador deve manter a sessão disponível à extensão.
         stage.iconifiedProperty()
                 .addListener(
-                        (o, old, minimized) -> {
-                            if (minimized) lock();
+                        (observable, previouslyMinimized, minimized) -> {
+                            if (minimized) {
+                                lock();
+                            }
                         });
         timer =
                 new Timeline(
                         new KeyFrame(
-                                Duration.seconds(1),
-                                e -> {
-                                    long now = System.nanoTime();
-                                    // Uma pausa longa entre ticks sugere suspensão ou atraso da UI.
-                                    // Ao retomar, bloqueia por precaução, além do limite de
-                                    // inatividade.
-                                    if (now - tick > TimeUnit.SECONDS.toNanos(10)
-                                            || now - activity > TimeUnit.MINUTES.toNanos(5)) lock();
-                                    tick = now;
-                                }));
+                                Duration.seconds(SESSION_CHECK_INTERVAL_SECONDS),
+                                event -> checkSessionTimeout()));
         timer.setCycleCount(Timeline.INDEFINITE);
         timer.play();
         showLocked();
         stage.show();
+    }
+
+    /** Uma pausa longa entre verificações sugere suspensão; ao retomar, bloqueia por precaução. */
+    private void checkSessionTimeout() {
+        long nowNanos = System.nanoTime();
+        boolean timerInterrupted =
+                nowNanos - lastTickNanos > TimeUnit.SECONDS.toNanos(MAX_TIMER_PAUSE_SECONDS);
+        boolean inactive =
+                nowNanos - lastActivityNanos > TimeUnit.MINUTES.toNanos(INACTIVITY_TIMEOUT_MINUTES);
+        if (timerInterrupted || inactive) {
+            lock();
+        }
+        lastTickNanos = nowNanos;
     }
 
     /**
@@ -101,69 +123,14 @@ public class VaultApp extends Application {
         try {
             boolean creating = !vault.exists();
             Label heading = new Label(creating ? "Crie seu cofre local" : "Cofre bloqueado");
-            heading.setStyle("-fx-font-size: 26px; -fx-font-weight: bold;");
+            heading.setStyle(HEADING_STYLE);
             PasswordField master = new PasswordField();
             master.setPromptText("Senha mestra");
             PasswordField confirmation = new PasswordField();
             confirmation.setPromptText("Confirme a senha mestra");
             Button submit = new Button(creating ? "Criar cofre" : "Desbloquear");
             submit.setDefaultButton(true);
-            submit.setOnAction(
-                    e -> {
-                        if (busy) return;
-                        if (creating && !master.getText().equals(confirmation.getText())) {
-                            message.setText("As senhas não coincidem.");
-                            return;
-                        }
-                        char[] secret = master.getText().toCharArray();
-                        master.clear();
-                        confirmation.clear();
-                        busy = true;
-                        submit.setDisable(true);
-                        // Guarda a sessão que iniciou o pedido para detectar bloqueios posteriores.
-                        int request = generation;
-                        message.setText("Processando…");
-                        worker.submit(
-                                () -> {
-                                    Exception failure = null;
-                                    try {
-                                        if (creating) vault.create(secret);
-                                        else vault.unlock(secret);
-                                    } catch (Exception ex) {
-                                        failure = ex;
-                                    }
-                                    Exception result = failure;
-                                    Platform.runLater(
-                                            () -> {
-                                                busy = false;
-                                                // Um resultado atrasado não pode reabrir a
-                                                // interface
-                                                // se houve bloqueio durante o
-                                                // cálculo.
-                                                if (request != generation) {
-                                                    vault.lock();
-                                                    showLocked();
-                                                    return;
-                                                }
-                                                submit.setDisable(false);
-                                                if (result != null) {
-                                                    message.setText(
-                                                            result
-                                                                            instanceof
-                                                                            IllegalArgumentException
-                                                                    ? result.getMessage()
-                                                                    : "Não foi possível abrir o"
-                                                                            + " cofre. Confira a"
-                                                                            + " senha; o arquivo"
-                                                                            + " também pode estar"
-                                                                            + " danificado.");
-                                                } else {
-                                                    activity = System.nanoTime();
-                                                    showVault();
-                                                }
-                                            });
-                                });
-                    });
+            submit.setOnAction(event -> authenticate(creating, master, confirmation, submit));
             root.getChildren()
                     .addAll(
                             heading,
@@ -171,13 +138,20 @@ public class VaultApp extends Application {
                                     "Os dados ficam criptografados neste computador. Guarde a senha"
                                             + " mestra: não há recuperação."),
                             master);
-            if (creating)
+            if (creating) {
                 root.getChildren()
-                        .addAll(confirmation, new Label("Senha mestra: pelo menos 12 caracteres."));
+                        .addAll(
+                                confirmation,
+                                new Label("Senha mestra: pelo menos "
+                                        + VaultService.MIN_MASTER_PASSWORD_LENGTH_CHARACTERS
+                                        + " caracteres."));
+            }
             Button restore = new Button("Restaurar backup");
             restore.setOnAction(
                     event -> {
-                        if (!busy) showRestore();
+                        if (!busy) {
+                            showRestore();
+                        }
                     });
             root.getChildren()
                     .addAll(
@@ -203,63 +177,63 @@ public class VaultApp extends Application {
         root.getChildren().clear();
         message.setText("");
         Label heading = new Label("Minhas credenciais");
-        heading.setStyle("-fx-font-size: 26px; -fx-font-weight: bold;");
+        heading.setStyle(HEADING_STYLE);
         Button block = new Button("Bloquear agora");
         block.setOnAction(e -> lock());
         search.setPromptText("Pesquisar título, usuário ou site");
+        bindCredentialListeners();
+        VBox editor = createCredentialEditor();
+        VBox entryList = new VBox(CONTROL_SPACING_PIXELS, search, items);
+        VBox.setVgrow(items, Priority.ALWAYS);
+        entryList.setPrefWidth(ENTRY_LIST_WIDTH_PIXELS);
+        HBox body = new HBox(SECTION_SPACING_PIXELS, entryList, editor);
+        VBox.setVgrow(body, Priority.ALWAYS);
+        root.getChildren()
+                .addAll(
+                        new HBox(SECTION_SPACING_PIXELS, heading, block),
+                        new Label(
+                                "Bloqueio após " + INACTIVITY_TIMEOUT_MINUTES
+                                + " minutos, ao minimizar ou ao detectar interrupção"
+                                        + " da sessão."),
+                        body,
+                        message);
+        root.getChildren().add(createBackupControls());
+        refresh();
+    }
+
+    private void bindCredentialListeners() {
         // Os controles são reutilizados após desbloquear; não acumula listeners a cada sessão.
         if (!listenersBound) {
-            search.textProperty().addListener((o, a, b) -> refresh());
+            search.textProperty().addListener((observable, previousText, currentText) -> refresh());
             items.getSelectionModel()
                     .selectedItemProperty()
                     .addListener(
-                            (o, a, b) -> {
-                                if (b == null) return;
-                                editing = b.id();
-                                var c = b.credential();
-                                title.setText(c.title());
-                                username.setText(c.username());
-                                password.setText(c.password());
-                                origins.setText(String.join(", ", c.allowedOrigins()));
-                                notes.setText(c.notes());
+                            (observable, previousEntry, selectedEntry) -> {
+                                if (selectedEntry == null) {
+                                    return;
+                                }
+                                editing = selectedEntry.id();
+                                Credential credential = selectedEntry.credential();
+                                title.setText(credential.title());
+                                username.setText(credential.username());
+                                password.setText(credential.password());
+                                origins.setText(String.join(", ", credential.allowedOrigins()));
+                                notes.setText(credential.notes());
+                                autofill.setSelected(credential.autofillEnabled());
                             });
             listenersBound = true;
         }
+    }
+
+    private VBox createCredentialEditor() {
         title.setPromptText("Título");
         username.setPromptText("Usuário / e-mail");
         password.setPromptText("Senha do site");
         origins.setPromptText("https://conta.exemplo.com (separe origens por vírgulas)");
         notes.setPromptText("Notas");
-        notes.setPrefRowCount(4);
+        notes.setPrefRowCount(NOTES_VISIBLE_ROWS);
         Button save = new Button("Salvar");
-        save.setOnAction(
-                e -> {
-                    try {
-                        List<String> sites =
-                                origins.getText().isBlank()
-                                        ? List.of()
-                                        : Arrays.stream(origins.getText().split(","))
-                                                .map(String::trim)
-                                                .toList();
-                        vault.save(
-                                editing,
-                                new Credential(
-                                        title.getText(),
-                                        username.getText(),
-                                        password.getText(),
-                                        sites,
-                                        false,
-                                        notes.getText()));
-                        clearForm();
-                        refresh();
-                        message.setText("Credencial salva.");
-                    } catch (Exception ex) {
-                        message.setText(
-                                ex instanceof IllegalArgumentException
-                                        ? ex.getMessage()
-                                        : "Não foi possível salvar a credencial.");
-                    }
-                });
+        save.setOnAction(event -> saveCredential());
         Button fresh = new Button("Novo cadastro");
         fresh.setOnAction(
                 e -> {
@@ -267,49 +241,74 @@ public class VaultApp extends Application {
                     clearForm();
                 });
         Button delete = new Button("Excluir selecionada");
-        delete.setOnAction(
-                e -> {
-                    if (editing == null) return;
-                    try {
-                        vault.delete(editing);
-                        clearForm();
-                        refresh();
-                        message.setText("Credencial excluída.");
-                    } catch (Exception ex) {
-                        message.setText("Não foi possível excluir.");
-                    }
-                });
-        VBox left = new VBox(10, search, items);
-        VBox.setVgrow(items, Priority.ALWAYS);
-        left.setPrefWidth(330);
-        VBox right =
+        delete.setOnAction(event -> deleteCredential());
+        VBox editor =
                 new VBox(
-                        10,
+                        CONTROL_SPACING_PIXELS,
                         new Label("Cadastro / edição"),
                         title,
                         username,
                         password,
                         origins,
+                        autofill,
                         notes,
-                        new HBox(10, save, fresh, delete));
-        HBox.setHgrow(right, Priority.ALWAYS);
-        HBox body = new HBox(20, left, right);
-        VBox.setVgrow(body, Priority.ALWAYS);
-        root.getChildren()
-                .addAll(
-                        new HBox(20, heading, block),
-                        new Label(
-                                "Bloqueio após 5 minutos, ao minimizar ou ao detectar interrupção"
-                                        + " da sessão."),
-                        body,
-                        message);
+                        new HBox(CONTROL_SPACING_PIXELS, save, fresh, delete));
+        HBox.setHgrow(editor, Priority.ALWAYS);
+        return editor;
+    }
+
+    private void saveCredential() {
+        try {
+            List<String> sites =
+                    origins.getText().isBlank()
+                            ? List.of()
+                            : Arrays.stream(origins.getText().split(","))
+                                    .map(String::trim)
+                                    .toList();
+            vault.save(
+                    editing,
+                    new Credential(
+                            title.getText(),
+                            username.getText(),
+                            password.getText(),
+                            sites,
+                            autofill.isSelected(),
+                            notes.getText()));
+            clearForm();
+            refresh();
+            message.setText("Credencial salva.");
+        } catch (Exception ex) {
+            message.setText(
+                    ex instanceof IllegalArgumentException
+                            ? ex.getMessage()
+                            : "Não foi possível salvar a credencial.");
+        }
+    }
+
+    private void deleteCredential() {
+        if (editing == null) {
+            return;
+        }
+        try {
+            vault.delete(editing);
+            clearForm();
+            refresh();
+            message.setText("Credencial excluída.");
+        } catch (Exception ex) {
+            message.setText("Não foi possível excluir.");
+        }
+    }
+
+    private HBox createBackupControls() {
         TextField backupPath = new TextField();
         backupPath.setPromptText("Caminho completo do arquivo de backup (pasta + nome do arquivo)");
         HBox.setHgrow(backupPath, Priority.ALWAYS);
         Button export = new Button("Salvar backup");
         export.setOnAction(
                 event -> {
-                    if (busy) return;
+                    if (busy) {
+                        return;
+                    }
                     try {
                         Path destination = Path.of(backupPath.getText());
                         if (backupPath.getText().isBlank()) {
@@ -324,10 +323,66 @@ public class VaultApp extends Application {
         Button restore = new Button("Restaurar backup");
         restore.setOnAction(
                 event -> {
-                    if (!busy) showRestore();
+                    if (!busy) {
+                        showRestore();
+                    }
                 });
-        root.getChildren().add(new HBox(10, backupPath, export, restore));
-        refresh();
+        return new HBox(CONTROL_SPACING_PIXELS, backupPath, export, restore);
+    }
+
+    private void authenticate(
+            boolean creating, PasswordField master, PasswordField confirmation, Button submit) {
+        if (busy) {
+            return;
+        }
+        if (creating && !master.getText().equals(confirmation.getText())) {
+            message.setText("As senhas não coincidem.");
+            return;
+        }
+        char[] secret = master.getText().toCharArray();
+        master.clear();
+        confirmation.clear();
+        busy = true;
+        submit.setDisable(true);
+        // Guarda a sessão que iniciou o pedido para detectar bloqueios posteriores.
+        int requestGeneration = generation;
+        message.setText("Processando…");
+        worker.submit(
+                () -> {
+                    Exception failure = null;
+                    try {
+                        if (creating) {
+                            vault.create(secret);
+                        } else {
+                            vault.unlock(secret);
+                        }
+                    } catch (Exception ex) {
+                        failure = ex;
+                    }
+                    Exception result = failure;
+                    Platform.runLater(() -> completeAuthentication(requestGeneration, submit, result));
+                });
+    }
+
+    /** Um resultado atrasado não reabre a interface se houve bloqueio durante a derivação. */
+    private void completeAuthentication(int requestGeneration, Button submit, Exception failure) {
+        busy = false;
+        if (requestGeneration != generation) {
+            vault.lock();
+            showLocked();
+            return;
+        }
+        submit.setDisable(false);
+        if (failure != null) {
+            message.setText(
+                    failure instanceof IllegalArgumentException
+                            ? failure.getMessage()
+                            : "Não foi possível abrir o cofre. Confira a senha; o arquivo"
+                                    + " também pode estar danificado.");
+        } else {
+            lastActivityNanos = System.nanoTime();
+            showVault();
+        }
     }
 
     /**
@@ -338,7 +393,7 @@ public class VaultApp extends Application {
         lock();
         root.getChildren().clear();
         Label heading = new Label("Restaurar backup");
-        heading.setStyle("-fx-font-size: 26px; -fx-font-weight: bold;");
+        heading.setStyle(HEADING_STYLE);
         TextField sourcePath = new TextField();
         sourcePath.setPromptText("Caminho completo do arquivo .cofre");
         PasswordField backupPassword = new PasswordField();
@@ -348,7 +403,9 @@ public class VaultApp extends Application {
         Button submit = new Button("Validar e restaurar");
         submit.setOnAction(
                 event -> {
-                    if (busy) return;
+                    if (busy) {
+                        return;
+                    }
                     if (!replace.isSelected() || sourcePath.getText().isBlank()) {
                         message.setText("Informe o arquivo e confirme a substituição.");
                         return;
@@ -365,7 +422,9 @@ public class VaultApp extends Application {
         Button back = new Button("Voltar");
         back.setOnAction(
                 event -> {
-                    if (!busy) showLocked();
+                    if (!busy) {
+                        showLocked();
+                    }
                 });
         root.getChildren()
                 .addAll(
@@ -376,7 +435,7 @@ public class VaultApp extends Application {
                         sourcePath,
                         backupPassword,
                         replace,
-                        new HBox(10, submit, back),
+                        new HBox(CONTROL_SPACING_PIXELS, submit, back),
                         message);
     }
 
@@ -404,7 +463,9 @@ public class VaultApp extends Application {
                     Platform.runLater(
                             () -> {
                                 busy = false;
-                                if (restoring) showLocked();
+                                if (restoring) {
+                                    showLocked();
+                                }
                                 if (result != null) {
                                     if (!restoring && result instanceof IllegalArgumentException) {
                                         message.setText(result.getMessage());
@@ -434,29 +495,26 @@ public class VaultApp extends Application {
      * remove as credenciais da tela por meio do bloqueio, sem manter resultados antigos visíveis.
      */
     private void refresh() {
-        if (!vault.unlocked()) return;
+        if (!vault.unlocked()) {
+            return;
+        }
         try {
             String term = search.getText().toLowerCase(Locale.ROOT);
             items.getItems()
                     .setAll(
                             vault.list().stream()
-                                    .filter(
-                                            e ->
-                                                    (e.credential().title()
-                                                                    + " "
-                                                                    + e.credential().username()
-                                                                    + " "
-                                                                    + String.join(
-                                                                            " ",
-                                                                            e.credential()
-                                                                                    .allowedOrigins()))
-                                                            .toLowerCase(Locale.ROOT)
-                                                            .contains(term))
+                                    .filter(entry -> matchesSearch(entry.credential(), term))
                                     .toList());
         } catch (Exception e) {
             lock();
             message.setText("Falha de integridade ou leitura. O cofre foi bloqueado.");
         }
+    }
+
+    private boolean matchesSearch(Credential credential, String term) {
+        String searchableText = credential.title() + " " + credential.username() + " "
+                + String.join(" ", credential.allowedOrigins());
+        return searchableText.toLowerCase(Locale.ROOT).contains(term);
     }
 
     private void clearForm() {
@@ -465,6 +523,7 @@ public class VaultApp extends Application {
         username.clear();
         password.clear();
         origins.clear();
+        autofill.setSelected(false);
         notes.clear();
     }
 
@@ -484,7 +543,9 @@ public class VaultApp extends Application {
 
     @Override
     public void stop() throws Exception {
-        if (statusServer != null) statusServer.close();
+        if (statusServer != null) {
+            statusServer.close();
+        }
         generation++;
         timer.stop();
         worker.shutdownNow();
