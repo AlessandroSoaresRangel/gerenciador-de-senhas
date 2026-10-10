@@ -1,5 +1,41 @@
 # Cofre local
 
+## Instalador Windows
+
+Para gerar um instalador que inclui desktop, Native Host e Java, instale o JDK
+21 ou superior, Maven e Inno Setup 6 na máquina de build. Execute na raiz:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
+```
+
+O build executa os testes Java e gera `target/installer-output/CofreLocal-Setup.exe`.
+Esse arquivo pode ser distribuído sozinho: o destinatário não precisa de JDK,
+Maven ou Node.js. O instalador Windows x64 instala por usuário, cria atalhos e
+solicita o ID de 32 letras exibido em `chrome://extensions`. Para testar antes
+da publicação, carregue a extensão sem compactação e informe seu ID.
+A extensão ainda precisa ser instalada separadamente no Chrome.
+
+Para preencher o ID da versão publicada por padrão:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1 -ExtensionId SEU_ID
+```
+
+O parâmetro é validado antes do build. Se necessário, informe `-CompilerPath`
+com o caminho de `ISCC.exe`. Builds sucessivos usam pastas de preparação novas
+e sobrescrevem o instalador de saída. Feche o desktop e o Chrome antes de
+atualizar uma instalação. A desinstalação preserva `.cofre-local` e backups;
+remove o registro do host somente se ele ainda pertence a essa instalação.
+O Native Host encaminha os pedidos ao desktop já aberto, sem abrir outro banco.
+O instalador gerado não possui assinatura digital.
+
+Teste da configuração do build:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\installer-config.test.ps1
+```
+
 Aplicativo desktop Java/JavaFX: criação e desbloqueio com senha mestra, cadastro, edição, pesquisa, exclusão, bloqueio, backup e restauração do cofre. A extensão Chrome consulta a sessão e mostra as contas correspondentes ao site aberto pelo host Native Messaging. Implementa os itens 1 a 6 da ordem de implementação, incluindo preenchimento de login mediante clique e automático autorizado por site.
 
 ## Executar
@@ -25,7 +61,7 @@ mvn javafx:run "-Djavafx.options=-Dvault.path=C:/caminho/cofre.db"
 
 Cadastre título, usuário, senha, origens HTTPS (opcionais, separadas por vírgula) e notas. Selecione uma credencial para editá-la ou excluí-la. A pesquisa funciona somente com o cofre desbloqueado.
 
-No cadastro, clique em **Gerar senha** para preencher o campo com uma senha aleatória de 10 caracteres, incluindo maiúsculas, minúsculas, números e símbolos. A geração usa `SecureRandom`; clique em **Salvar** para gravar a credencial no cofre.
+No cadastro, clique em **Gerar senha** para preencher o campo com uma senha aleatória de 16 caracteres, incluindo maiúsculas, minúsculas, números e símbolos. A geração usa `SecureRandom`; clique em **Salvar** para gravar a credencial no cofre. O formulário permite visualizar e copiar a senha. Nos cards, use **Exibir senha** e **Ocultar senha** para alternar a visualização; **Copiar senha** funciona mesmo com a senha oculta.
 
 Na tela da senha mestra, **Excluir cofre e começar do zero** permite apagar o banco atual sem conhecer a senha antiga. Digite **EXCLUIR** e confirme **Excluir definitivamente**. Todas as contas e a senha mestra antiga são removidas; o aplicativo prepara um banco vazio e abre a criação de uma nova senha mestra. Os arquivos de backup existentes são preservados. Cancelar a confirmação mantém o cofre atual.
 

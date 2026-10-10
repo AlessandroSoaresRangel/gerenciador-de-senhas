@@ -239,7 +239,10 @@ class VaultAppTest {
                 textField(root, "Usuário / e-mail").setText("usuário fictício");
                 button(root, "Gerar senha").fire();
                 String generatedPassword = textField(root, "Senha do site").getText();
-                assertEquals(10, generatedPassword.length());
+                assertFalse(textField(root, "Senha do site") instanceof PasswordField);
+                button(root, "Copiar senha").fire();
+                assertEquals(generatedPassword, javafx.scene.input.Clipboard.getSystemClipboard().getString());
+                assertEquals(16, generatedPassword.length());
                 assertTrue(generatedPassword.chars().anyMatch(Character::isUpperCase));
                 assertTrue(generatedPassword.chars().anyMatch(Character::isLowerCase));
                 assertTrue(generatedPassword.chars().anyMatch(Character::isDigit));
@@ -250,6 +253,12 @@ class VaultAppTest {
                 assertTrue(hasLabel(root, "usuário fictício"));
                 assertFalse(descendants(root).anyMatch(PasswordField.class::isInstance));
                 assertFalse(hasLabel(root, generatedPassword));
+                button(root, "Exibir senha").fire();
+                assertTrue(hasLabel(root, generatedPassword));
+                button(root, "Ocultar senha").fire();
+                assertFalse(hasLabel(root, generatedPassword));
+                button(root, "Copiar senha").fire();
+                assertEquals(generatedPassword, javafx.scene.input.Clipboard.getSystemClipboard().getString());
                 button(root, "Adicionar conta").fire();
                 textField(root, "Título").setText("Segunda conta");
                 textField(root, "Senha do site").setText("senha fictícia");
@@ -266,6 +275,9 @@ class VaultAppTest {
                 search.clear();
                 editCard(root, "Conta de teste").fire();
                 assertEquals(generatedPassword, textField(root, "Senha do site").getText());
+                assertFalse(textField(root, "Senha do site") instanceof PasswordField);
+                button(root, "Copiar senha").fire();
+                assertEquals(generatedPassword, javafx.scene.input.Clipboard.getSystemClipboard().getString());
                 textField(root, "Título").setText("Conta editada");
                 button(root, "Salvar").fire();
                 assertTrue(hasLabel(root, "Conta editada"));

@@ -4,7 +4,7 @@ import java.security.SecureRandom;
 
 /** Gera senhas para credenciais de sites. */
 public final class PasswordGenerator {
-    public static final int PASSWORD_LENGTH_CHARACTERS = 10;
+    public static final int PASSWORD_LENGTH_CHARACTERS = 16;
     private static final String UPPERCASE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     private static final String LOWERCASE_LETTERS = "abcdefghijklmnopqrstuvwxyz";
     private static final String DIGITS = "0123456789";

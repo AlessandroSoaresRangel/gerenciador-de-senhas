@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PasswordGeneratorTest {
     @Test
-    void generatesTenCharactersIncludingEveryCharacterCategory() {
+    void generatesSixteenCharactersIncludingEveryCharacterCategory() {
         var generator = new PasswordGenerator();
         for (int sample = 0; sample < 100; sample++) {
             String password = generator.generate();
-            assertEquals(10, password.length());
-            assertTrue(password.matches("[A-Za-z0-9!@#$%&*?+=_-]{10}"));
+            assertEquals(16, password.length());
+            assertTrue(password.matches("[A-Za-z0-9!@#$%&*?+=_-]{16}"));
             assertTrue(password.chars().anyMatch(Character::isUpperCase));
             assertTrue(password.chars().anyMatch(Character::isLowerCase));
             assertTrue(password.chars().anyMatch(Character::isDigit));

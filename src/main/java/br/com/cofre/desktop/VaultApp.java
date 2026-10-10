@@ -15,6 +15,8 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
@@ -62,7 +64,7 @@ public class VaultApp extends Application {
     private final TextField origins = new TextField();
     private final CheckBox autofill = new CheckBox("Permitir preenchimento automático nas origens cadastradas");
     private final TextField search = new TextField();
-    private final PasswordField password = new PasswordField();
+    private final TextField password = new TextField();
     private final TextArea notes = new TextArea();
     private String editing;
 
@@ -358,7 +360,6 @@ public class VaultApp extends Application {
         showCredentialForm();
     }
 
-    /** Os cartões exibem apenas metadados; a senha permanece no campo protegido da edição. */
     private VBox createAccountCard(VaultEntry entry) {
         Credential credential = entry.credential();
         Label accountTitle = new Label(credential.title());
@@ -366,6 +367,17 @@ public class VaultApp extends Application {
         accountTitle.setWrapText(true);
         Label accountUsername = new Label(credential.username());
         accountUsername.setWrapText(true);
+        Label accountPassword = new Label("Senha oculta");
+        accountPassword.setWrapText(true);
+        Button showPassword = new Button("Exibir senha");
+        showPassword.setOnAction(event -> {
+            boolean revealing = "Exibir senha".equals(showPassword.getText());
+            accountPassword.setText(revealing ? credential.password() : "Senha oculta");
+            showPassword.setText(revealing ? "Ocultar senha" : "Exibir senha");
+        });
+        Button copyPassword = new Button("Copiar senha");
+        copyPassword.setOnAction(event -> copyPassword(credential.password()));
+        HBox passwordActions = new HBox(CONTROL_SPACING_PIXELS, showPassword, copyPassword);
         Label sites = new Label(credential.allowedOrigins().isEmpty()
                 ? "Nenhum site cadastrado" : String.join("\n", credential.allowedOrigins()));
         sites.getStyleClass().add("muted-label");
@@ -373,7 +385,8 @@ public class VaultApp extends Application {
         Button edit = new Button("Editar conta");
         edit.setMaxWidth(Double.MAX_VALUE);
         edit.setOnAction(event -> editCredential(entry));
-        VBox card = new VBox(CONTROL_SPACING_PIXELS, accountTitle, accountUsername, sites, edit);
+        VBox card = new VBox(CONTROL_SPACING_PIXELS, accountTitle, accountUsername,
+                labeledField("Senha", accountPassword), passwordActions, sites, edit);
         card.getStyleClass().addAll("card", "account-card");
         card.setPrefWidth(ACCOUNT_CARD_WIDTH_PIXELS);
         return card;
@@ -655,8 +668,18 @@ public class VaultApp extends Application {
         return new VBox(LABEL_SPACING_PIXELS, label, control);
     }
 
-    private HBox passwordControls(PasswordField field, Button generate) {
-        HBox controls = new HBox(CONTROL_SPACING_PIXELS, field, generate);
+    private void copyPassword(String value) {
+        ClipboardContent content = new ClipboardContent();
+        content.putString(value);
+        boolean copied = Clipboard.getSystemClipboard().setContent(content);
+        message.setText(copied ? "Senha copiada." : "Não foi possível copiar a senha.");
+    }
+
+    private HBox passwordControls(TextField field, Button generate) {
+        Button copy = new Button("Copiar senha");
+        copy.disableProperty().bind(field.textProperty().isEmpty());
+        copy.setOnAction(event -> copyPassword(field.getText()));
+        HBox controls = new HBox(CONTROL_SPACING_PIXELS, field, generate, copy);
         HBox.setHgrow(field, Priority.ALWAYS);
         return controls;
     }

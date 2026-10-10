@@ -10,35 +10,40 @@ class WindowLifecycleTest {
     void keepRunningPreservesSessionAndTrayCanRestoreOrExit() {
         var window = new TestWindow();
         var tray = new TestTray(true);
-        var lifecycle = new WindowLifecycle(tray, window);
-        lifecycle.requestClose(WindowLifecycle.CloseChoice.KEEP_RUNNING);
-        assertEquals(List.of("hide"), window.events);
-        tray.open.run();
-        tray.exit.run();
-        assertEquals(List.of("hide", "restore", "exit"), window.events);
-        lifecycle.close();
+        try (var lifecycle = new WindowLifecycle(tray, window)) {
+            lifecycle.requestClose(WindowLifecycle.CloseChoice.KEEP_RUNNING);
+            assertEquals(List.of("hide"), window.events);
+            tray.open.run();
+            tray.exit.run();
+            assertEquals(List.of("hide", "restore", "exit"), window.events);
+        }
         assertTrue(tray.closed);
     }
 
     @Test
     void unsupportedTrayMinimizesWithoutLockingOrHiding() {
         var window = new TestWindow();
-        new WindowLifecycle(new TestTray(false), window)
-                .requestClose(WindowLifecycle.CloseChoice.KEEP_RUNNING);
-        assertEquals(List.of("minimize"), window.events);
+        var tray = new TestTray(false);
+        try (var lifecycle = new WindowLifecycle(tray, window)) {
+            lifecycle.requestClose(WindowLifecycle.CloseChoice.KEEP_RUNNING);
+            assertEquals(List.of("minimize"), window.events);
+        }
+        assertTrue(tray.closed);
     }
 
     @Test
     void cancelPreservesWindowAndExitEndsApplication() {
         var window = new TestWindow();
         var tray = new TestTray(true);
-        var lifecycle = new WindowLifecycle(tray, window);
-        lifecycle.requestClose(WindowLifecycle.CloseChoice.CANCEL);
-        assertTrue(window.events.isEmpty());
-        assertNull(tray.open);
-        lifecycle.requestClose(WindowLifecycle.CloseChoice.EXIT);
-        assertEquals(List.of("exit"), window.events);
-        assertNull(tray.open);
+        try (var lifecycle = new WindowLifecycle(tray, window)) {
+            lifecycle.requestClose(WindowLifecycle.CloseChoice.CANCEL);
+            assertTrue(window.events.isEmpty());
+            assertNull(tray.open);
+            lifecycle.requestClose(WindowLifecycle.CloseChoice.EXIT);
+            assertEquals(List.of("exit"), window.events);
+            assertNull(tray.open);
+        }
+        assertTrue(tray.closed);
     }
 
     private static final class TestTray implements DesktopTray {
