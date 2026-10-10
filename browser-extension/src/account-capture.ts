@@ -1,5 +1,6 @@
 import {httpsOrigin, nativeRequest, validateMatches} from "./matches.js";
 import {PROTOCOL_VERSION} from "./status.js";
+import {setAutomaticAccount} from "./autofill.js";
 
 const DRAFT_LIFETIME_MILLIS = 120000;
 const MAX_LABEL_LENGTH_CHARACTERS = 512;
@@ -10,6 +11,7 @@ interface Draft {
     username: string;
     password: string;
     expiresAt: number;
+    automaticEligible: boolean;
 }
 const drafts = new Map<string, {draft: Draft; timer: ReturnType<typeof setTimeout>}>();
 const pendingTabs = new Set<number>();
@@ -48,7 +50,7 @@ async function offerSave(request: Record<string, unknown>, sender: chrome.runtim
         if (accounts.some(account => account.username.trim() === username))
             return {ok: true, offered: false};
         token = crypto.randomUUID();
-        const draft = {origin, title: new URL(origin).hostname, username, password,
+        const draft = {origin, title: new URL(origin).hostname, username, password, automaticEligible: accounts.length === 0,
             expiresAt: Date.now() + DRAFT_LIFETIME_MILLIS};
         const draftToken = token;
         drafts.set(token, {draft, timer: setTimeout(() => removeDraft(draftToken), DRAFT_LIFETIME_MILLIS)});
@@ -78,6 +80,14 @@ async function saveConfirmed(request: Record<string, unknown>) {
         if (result?.version !== PROTOCOL_VERSION || result.requestId !== requestId || result.ok !== true
                 || typeof result.saved !== "boolean")
             return {ok: false, error: "SAVE_DENIED"};
+        if (result.saved && result.automaticEnabled === true
+                && typeof result.accountId === "string" && result.accountId) {
+            try {
+                await setAutomaticAccount(origin, result.accountId);
+            } catch {
+                // A conta já foi salva; falha de permissão/configuração não transforma o cadastro em erro.
+            }
+        }
         return {ok: true, saved: result.saved};
     } finally {
         payload.password = "";

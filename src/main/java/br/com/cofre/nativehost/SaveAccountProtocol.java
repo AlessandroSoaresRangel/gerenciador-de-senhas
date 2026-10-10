@@ -42,17 +42,17 @@ public final class SaveAccountProtocol {
             }
             String origin = Credential.origin(request.path("origin").asText());
             if (validationOnly) {
-                return accepted(requestId, false);
+                return accepted(requestId, new VaultService.AccountRegistration(false, "", false));
             }
             if (vault == null) {
                 return denied(requestId);
             }
-            boolean saved = vault.saveNewAccount(origin, request.path("title").asText(),
+            VaultService.AccountRegistration registration = vault.registerNewAccount(origin, request.path("title").asText(),
                     request.path("username").asText(), request.path("password").asText());
-            if (saved) {
+            if (registration.saved()) {
                 afterSave.run();
             }
-            return accepted(requestId, saved);
+            return accepted(requestId, registration);
         } catch (Exception failure) {
             return denied(requestId);
         } finally {
@@ -67,9 +67,10 @@ public final class SaveAccountProtocol {
         return value.isTextual() && !value.asText().isBlank() && value.asText().length() <= maximumLength;
     }
 
-    private byte[] accepted(String id, boolean saved) throws Exception {
+    private byte[] accepted(String id, VaultService.AccountRegistration registration) throws Exception {
         return json.writeValueAsBytes(Map.of("version", StatusProtocol.PROTOCOL_VERSION,
-                "requestId", id, "ok", true, "saved", saved));
+                "requestId", id, "ok", true, "saved", registration.saved(),
+                "accountId", registration.accountId(), "automaticEnabled", registration.automaticEnabled()));
     }
 
     private byte[] denied(String id) throws Exception {

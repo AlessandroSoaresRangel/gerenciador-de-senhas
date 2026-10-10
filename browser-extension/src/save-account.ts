@@ -4,8 +4,10 @@ interface CapturedDraft {
     username: string;
     password: string;
     expiresAt: number;
+    automaticEligible: boolean;
 }
 export {};
+import {permissionPattern} from "./autofill.js";
 const form = document.querySelector<HTMLFormElement>("#save-account-form")!;
 const titleInput = document.querySelector<HTMLInputElement>("#capture-title")!;
 const status = document.querySelector<HTMLParagraphElement>("#capture-status")!;
@@ -34,7 +36,9 @@ async function initialize() {
         document.querySelector("#capture-username")!.textContent = draft!.username;
         titleInput.value = draft!.title;
         saveButton.disabled = false;
-        status.textContent = "A senha será guardada criptografada somente após sua confirmação.";
+        status.textContent = draft!.automaticEligible
+                ? "A senha será guardada criptografada. Se esta for a única conta do site, ela será usada automaticamente."
+                : "A senha será guardada criptografada. A escolha atual de conta automática será mantida.";
         expirationTimer = setTimeout(() => {
             clearDraft();
             saveButton.disabled = true;
@@ -54,14 +58,20 @@ form.addEventListener("submit", async event => {
     cancelButton.disabled = true;
     const request = {command: "SAVE_NEW_ACCOUNT", ...draft, title: titleInput.value.trim()};
     try {
+        if (draft.automaticEligible) {
+            try {
+                await chrome.permissions.request({origins: [permissionPattern(draft.origin)]});
+            } catch {
+                // O cadastro continua mesmo se o navegador não conceder o acesso automático ao site.
+            }
+        }
         const pending = chrome.runtime.sendMessage(request);
         request.password = "";
         const result = await pending;
         if (result?.ok !== true)
             throw new Error("SAVE_DENIED");
         clearDraft();
-        status.textContent = result.saved ? "Conta salva no cofre." : "Esta conta já está cadastrada.";
-        cancelButton.textContent = "Fechar";
+        window.close();
     } catch {
         status.textContent = "Não foi possível salvar. Abra e desbloqueie o aplicativo, depois tente novamente.";
         saveButton.disabled = !draft;

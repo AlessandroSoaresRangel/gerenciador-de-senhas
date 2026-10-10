@@ -171,3 +171,24 @@ test("known user or locked vault must not offer a new account", async () => {
     assert.equal(opened, 0);
   }
 });
+
+
+test("saving first account selects automatic account; multiple accounts preserve prior choice", async () => {
+  const writes = [];
+  chrome.permissions = {contains: async () => true};
+  chrome.storage = {local: {get: async () => ({autofill: {"https://auto.exemplo.com": "previous"}}),
+    set: async value => writes.push(value)}};
+  const sender = {id: "extension-test", url: "chrome-extension://extension-test/save-account.html?token=test"};
+  for (const automaticEnabled of [true, false]) {
+    chrome.runtime.sendNativeMessage = (_host, request, respond) => respond({version: request.version,
+      requestId: request.requestId, ok: true, saved: true, accountId: "new", automaticEnabled});
+    let response;
+    assert.equal(handler({command: "SAVE_NEW_ACCOUNT", origin: "https://auto.exemplo.com",
+      title: "Conta", username: "teste", password: "senha ficticia", expiresAt: Date.now() + 120000},
+      sender, value => {response = value;}), true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(response.ok, true);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].autofill["https://auto.exemplo.com"], "new");
+  }
+});

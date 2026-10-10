@@ -6,8 +6,9 @@ import {JSDOM} from "jsdom";
 const html = await readFile(new URL("../save-account.html", import.meta.url), "utf8");
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-for (const confirm of [false, true]) {
-  test(confirm ? "private confirmation saves captured credentials only after user submits"
+for (const scenario of ["cancel", "save", "failure"]) {
+  const confirm = scenario !== "cancel";
+  test(confirm ? `private confirmation ${scenario} closes only after success`
     : "cancel private confirmation without saving", async () => {
     const dom = new JSDOM(html, {url: "chrome-extension://extension-test/save-account.html?token=abc"});
     const originalClose = dom.window.close.bind(dom.window);
@@ -17,16 +18,16 @@ for (const confirm of [false, true]) {
     globalThis.window = dom.window;
     globalThis.location = dom.window.location;
     const calls = [];
-    globalThis.chrome = {runtime: {sendMessage: async request => {
+    globalThis.chrome = {permissions: {request: async () => true}, runtime: {sendMessage: async request => {
       calls.push({...request});
       if (request.command === "GET_CAPTURED_LOGIN") return {ok: true, draft: {
         origin: "https://conta.exemplo.com", title: "Conta", username: "teste",
-        password: "senha ficticia", expiresAt: Date.now() + 120000
+        password: "senha ficticia", expiresAt: Date.now() + 120000, automaticEligible: true
       }};
-      return {ok: true, saved: true};
+      return {ok: scenario !== "failure", saved: scenario !== "failure"};
     }}};
     try {
-      await import(`../dist/save-account.js?confirm=${confirm}`);
+      await import(`../dist/save-account.js?scenario=${scenario}`);
       await flush();
       assert.equal(calls.length, 1);
       assert.equal(document.body.textContent.includes("senha ficticia"), false);
@@ -37,7 +38,8 @@ for (const confirm of [false, true]) {
         assert.equal(calls[1].command, "SAVE_NEW_ACCOUNT");
         assert.equal(calls[1].password, "senha ficticia");
         assert.equal(calls[1].title, "Nome escolhido");
-        assert.match(document.querySelector("#capture-status").textContent, /Conta salva/);
+        assert.equal(closed, scenario === "save");
+        if (scenario === "failure") assert.equal(document.querySelector("#save-account").disabled, false);
       } else {
         document.querySelector("#cancel-save").click();
         assert.equal(closed, true);

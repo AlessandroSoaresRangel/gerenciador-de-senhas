@@ -30,11 +30,18 @@ class SaveAccountProtocolTest {
             var result = json.readTree(protocol.handle(input));
             assertTrue(result.path("ok").asBoolean());
             assertTrue(result.path("saved").asBoolean());
+            assertTrue(result.path("automaticEnabled").asBoolean());
+            assertFalse(result.path("accountId").asText().isEmpty());
             assertFalse(result.toString().contains("senha fictícia"));
             assertFalse(json.readTree(protocol.handle(input)).path("saved").asBoolean());
             assertEquals(1, notifications.get());
             assertEquals(1, vault.list().size());
             assertEquals("senha fictícia", vault.list().getFirst().credential().password());
+            var second = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(input);
+            second.put("username", "outro usuario");
+            var secondResult = json.readTree(protocol.handle(json.writeValueAsBytes(second)));
+            assertTrue(secondResult.path("saved").asBoolean());
+            assertFalse(secondResult.path("automaticEnabled").asBoolean());
             vault.lock();
             assertFalse(json.readTree(protocol.handle(input)).path("ok").asBoolean());
         }

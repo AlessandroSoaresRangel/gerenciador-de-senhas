@@ -252,18 +252,29 @@ public final class VaultService implements AutoCloseable {
     /** O cadastro confirmado pela extensão não sobrescreve outra conta do mesmo usuário e origem. */
     public synchronized boolean saveNewAccount(String origin, String title, String username, String password)
             throws Exception {
+        return registerNewAccount(origin, title, username, password).saved();
+    }
+
+    public record AccountRegistration(boolean saved, String accountId, boolean automaticEnabled) {}
+
+    /** A verificação e gravação usam a mesma sessão: só a primeira conta da origem recebe o automático. */
+    public synchronized AccountRegistration registerNewAccount(String origin, String title, String username, String password)
+            throws Exception {
         requireUnlocked();
         String normalizedOrigin = Credential.origin(origin);
         if (username == null || username.isBlank()) {
             throw new IllegalArgumentException("Informe o usuário.");
         }
         String normalizedUsername = username.trim();
-        if (listMatches(normalizedOrigin).stream()
+        List<AccountMatch> accounts = listMatches(normalizedOrigin);
+        if (accounts.stream()
                 .anyMatch(account -> account.username().trim().equals(normalizedUsername))) {
-            return false;
+            return new AccountRegistration(false, "", false);
         }
-        save(null, new Credential(title, normalizedUsername, password, List.of(normalizedOrigin), false, ""));
-        return true;
+        boolean automaticEnabled = accounts.isEmpty();
+        String accountId = save(null, new Credential(title, normalizedUsername, password,
+                List.of(normalizedOrigin), automaticEnabled, ""));
+        return new AccountRegistration(true, accountId, automaticEnabled);
     }
 
     public synchronized void delete(String id) throws SQLException {

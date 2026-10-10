@@ -22,7 +22,10 @@ class VaultMatchesTest {
             assertTrue(vault.saveNewAccount("https://outro.exemplo.com", "Outra", "teste", "outra senha"));
             assertEquals(2, vault.list().size());
             assertEquals("senha fictícia", vault.list().getFirst().credential().password());
-            assertFalse(vault.list().getFirst().credential().autofillEnabled());
+            assertTrue(vault.list().getFirst().credential().autofillEnabled());
+            assertTrue(vault.saveNewAccount("https://conta.exemplo.com", "Terceira", "outro", "teste"));
+            assertFalse(vault.list().stream().filter(entry -> entry.credential().username().equals("outro"))
+                    .findFirst().orElseThrow().credential().autofillEnabled());
             vault.lock();
             assertThrows(IllegalStateException.class, () ->
                     vault.saveNewAccount("https://conta.exemplo.com", "Conta", "novo", "senha fictícia"));
