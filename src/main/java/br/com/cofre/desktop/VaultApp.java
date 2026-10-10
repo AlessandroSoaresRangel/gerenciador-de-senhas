@@ -13,6 +13,8 @@ import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.input.InputEvent;
@@ -27,16 +29,20 @@ import java.util.concurrent.*;
 public class VaultApp extends Application {
     private static final int ROOT_SPACING_PIXELS = 14;
     private static final int CONTROL_SPACING_PIXELS = 10;
+    private static final int LABEL_SPACING_PIXELS = 6;
     private static final int SECTION_SPACING_PIXELS = 20;
     private static final int WINDOW_PADDING_PIXELS = 24;
-    private static final int WINDOW_WIDTH_PIXELS = 900;
-    private static final int WINDOW_HEIGHT_PIXELS = 650;
-    private static final int ENTRY_LIST_WIDTH_PIXELS = 330;
+    private static final int WINDOW_WIDTH_PIXELS = 1100;
+    private static final int WINDOW_HEIGHT_PIXELS = 820;
+    private static final int ACCOUNT_CARD_WIDTH_PIXELS = 300;
+    private static final int EDITOR_WIDTH_PIXELS = 720;
     private static final int NOTES_VISIBLE_ROWS = 4;
     private static final int SESSION_CHECK_INTERVAL_SECONDS = 1;
     private static final int MAX_TIMER_PAUSE_SECONDS = 10;
     private static final int INACTIVITY_TIMEOUT_MINUTES = 5;
-    private static final String HEADING_STYLE = "-fx-font-size: 26px; -fx-font-weight: bold;";
+    private static final int ACCESS_CARD_WIDTH_PIXELS = 480;
+    private static final int MIN_WINDOW_WIDTH_PIXELS = 960;
+    private static final int MIN_WINDOW_HEIGHT_PIXELS = 740;
 
     private VaultService vault;
     private StatusServer statusServer;
@@ -57,7 +63,7 @@ public class VaultApp extends Application {
     private boolean listenersBound;
     private boolean stopped;
     private CompletableFuture<Void> pendingExtensionUnlock;
-    private final ListView<VaultEntry> items = new ListView<>();
+    private final FlowPane accountCards = new FlowPane(SECTION_SPACING_PIXELS, SECTION_SPACING_PIXELS);
     private final TextField title = new TextField();
     private final TextField username = new TextField();
     private final TextField origins = new TextField();
@@ -81,7 +87,15 @@ public class VaultApp extends Application {
                         new StatusProtocol(vault::status, vault::listMatches, new FillProtocol(vault),
                                 new UnlockProtocol(this::unlockFromExtension)));
         root.setPadding(new Insets(WINDOW_PADDING_PIXELS));
+        root.getStyleClass().add("app-root");
+        message.getStyleClass().add("status-message");
+        message.setWrapText(true);
+        message.managedProperty().bind(message.textProperty().isNotEmpty());
         Scene scene = new Scene(root, WINDOW_WIDTH_PIXELS, WINDOW_HEIGHT_PIXELS);
+        scene.getStylesheets().add(Objects.requireNonNull(
+                VaultApp.class.getResource("vault.css"), "Tema da interface ausente").toExternalForm());
+        stage.setMinWidth(MIN_WINDOW_WIDTH_PIXELS);
+        stage.setMinHeight(MIN_WINDOW_HEIGHT_PIXELS);
         scene.addEventFilter(InputEvent.ANY, event -> lastActivityNanos = System.nanoTime());
         stage.setTitle("Cofre local");
         stage.setScene(scene);
@@ -127,12 +141,14 @@ public class VaultApp extends Application {
         try {
             boolean creating = !vault.exists();
             Label heading = new Label(creating ? "Crie seu cofre local" : "Cofre bloqueado");
-            heading.setStyle(HEADING_STYLE);
+            heading.getStyleClass().add("page-heading");
             PasswordField master = new PasswordField();
             master.setPromptText("Senha mestra");
             PasswordField confirmation = new PasswordField();
             confirmation.setPromptText("Confirme a senha mestra");
             Button submit = new Button(creating ? "Criar cofre" : "Desbloquear");
+            submit.getStyleClass().add("primary-button");
+            submit.setMaxWidth(Double.MAX_VALUE);
             submit.setDefaultButton(true);
             submit.setOnAction(event -> authenticate(creating, master, confirmation, submit));
             root.getChildren()
@@ -141,11 +157,11 @@ public class VaultApp extends Application {
                             new Label(
                                     "Os dados ficam criptografados neste computador. Guarde a senha"
                                             + " mestra: não há recuperação."),
-                            master);
+                            labeledField("Senha mestra", master));
             if (creating) {
                 root.getChildren()
                         .addAll(
-                                confirmation,
+                                labeledField("Confirmar senha mestra", confirmation),
                                 new Label("Senha mestra: pelo menos "
                                         + VaultService.MIN_MASTER_PASSWORD_LENGTH_CHARACTERS
                                         + " caracteres."));
@@ -171,6 +187,7 @@ public class VaultApp extends Application {
                                                                     ".cofre-local",
                                                                     "vault.db")
                                                             .toString()))));
+            centerAccessCard();
         } catch (Exception e) {
             message.setText("Não foi possível acessar o arquivo do cofre.");
             root.getChildren().add(message);
@@ -178,61 +195,101 @@ public class VaultApp extends Application {
     }
 
     private void showVault() {
+        clearForm();
         root.getChildren().clear();
         message.setText("");
         Label heading = new Label("Minhas credenciais");
-        heading.setStyle(HEADING_STYLE);
+        heading.getStyleClass().add("page-heading");
         Button block = new Button("Bloquear agora");
-        block.setOnAction(e -> lock());
+        block.setOnAction(event -> lock());
+        Button add = new Button("Adicionar conta");
+        add.getStyleClass().add("primary-button");
+        add.setOnAction(event -> {
+            clearForm();
+            showCredentialForm();
+        });
         search.setPromptText("Pesquisar título, usuário ou site");
         bindCredentialListeners();
-        VBox editor = createCredentialEditor();
-        VBox entryList = new VBox(CONTROL_SPACING_PIXELS, search, items);
-        VBox.setVgrow(items, Priority.ALWAYS);
-        entryList.setPrefWidth(ENTRY_LIST_WIDTH_PIXELS);
-        HBox body = new HBox(SECTION_SPACING_PIXELS, entryList, editor);
-        VBox.setVgrow(body, Priority.ALWAYS);
-        root.getChildren()
-                .addAll(
-                        new HBox(SECTION_SPACING_PIXELS, heading, block),
-                        new Label(
-                                "Bloqueio após " + INACTIVITY_TIMEOUT_MINUTES
-                                + " minutos, ao minimizar ou ao detectar interrupção"
-                                        + " da sessão."),
-                        body,
-                        message);
-        root.getChildren().add(createBackupControls());
+        HBox toolbar = new HBox(CONTROL_SPACING_PIXELS, search, add);
+        HBox.setHgrow(search, Priority.ALWAYS);
+        ScrollPane cardsScroll = new ScrollPane(accountCards);
+        cardsScroll.setFitToWidth(true);
+        cardsScroll.getStyleClass().add("cards-scroll");
+        VBox.setVgrow(cardsScroll, Priority.ALWAYS);
+        root.getChildren().addAll(createHeader(heading, block),
+                new Label("Selecione uma conta para editar ou adicione um novo cadastro."),
+                toolbar, cardsScroll, message, createBackupControls());
         refresh();
     }
 
     private void bindCredentialListeners() {
-        // Os controles são reutilizados após desbloquear; não acumula listeners a cada sessão.
         if (!listenersBound) {
             search.textProperty().addListener((observable, previousText, currentText) -> refresh());
-            items.getSelectionModel()
-                    .selectedItemProperty()
-                    .addListener(
-                            (observable, previousEntry, selectedEntry) -> {
-                                if (selectedEntry == null) {
-                                    return;
-                                }
-                                editing = selectedEntry.id();
-                                Credential credential = selectedEntry.credential();
-                                title.setText(credential.title());
-                                username.setText(credential.username());
-                                password.setText(credential.password());
-                                origins.setText(String.join(", ", credential.allowedOrigins()));
-                                notes.setText(credential.notes());
-                                autofill.setSelected(credential.autofillEnabled());
-                            });
             listenersBound = true;
         }
+    }
+
+    private void showCredentialForm() {
+        root.getChildren().clear();
+        accountCards.getChildren().clear();
+        message.setText("");
+        Label heading = new Label(editing == null ? "Adicionar conta" : "Editar conta");
+        heading.getStyleClass().add("page-heading");
+        Button block = new Button("Bloquear agora");
+        block.setOnAction(event -> lock());
+        Button back = new Button("Voltar para contas");
+        back.setOnAction(event -> showVault());
+        VBox editor = createCredentialEditor();
+        editor.setMaxWidth(EDITOR_WIDTH_PIXELS);
+        StackPane centered = new StackPane(editor);
+        centered.setAlignment(Pos.TOP_CENTER);
+        ScrollPane editorScroll = new ScrollPane(centered);
+        editorScroll.setFitToWidth(true);
+        editorScroll.getStyleClass().add("cards-scroll");
+        VBox.setVgrow(editorScroll, Priority.ALWAYS);
+        root.getChildren().addAll(createHeader(heading, block), back, editorScroll, message);
+    }
+
+    private void editCredential(VaultEntry entry) {
+        editing = entry.id();
+        Credential credential = entry.credential();
+        title.setText(credential.title());
+        username.setText(credential.username());
+        password.setText(credential.password());
+        origins.setText(String.join(", ", credential.allowedOrigins()));
+        notes.setText(credential.notes());
+        autofill.setSelected(credential.autofillEnabled());
+        showCredentialForm();
+    }
+
+    /** Os cartões exibem apenas metadados; a senha permanece no campo protegido da edição. */
+    private VBox createAccountCard(VaultEntry entry) {
+        Credential credential = entry.credential();
+        Label accountTitle = new Label(credential.title());
+        accountTitle.getStyleClass().add("section-heading");
+        accountTitle.setWrapText(true);
+        Label accountUsername = new Label(credential.username());
+        accountUsername.setWrapText(true);
+        Label sites = new Label(credential.allowedOrigins().isEmpty()
+                ? "Nenhum site cadastrado" : String.join("\n", credential.allowedOrigins()));
+        sites.getStyleClass().add("muted-label");
+        sites.setWrapText(true);
+        Button edit = new Button("Editar conta");
+        edit.setMaxWidth(Double.MAX_VALUE);
+        edit.setOnAction(event -> editCredential(entry));
+        VBox card = new VBox(CONTROL_SPACING_PIXELS, accountTitle, accountUsername, sites, edit);
+        card.getStyleClass().addAll("card", "account-card");
+        card.setPrefWidth(ACCOUNT_CARD_WIDTH_PIXELS);
+        return card;
     }
 
     private VBox createCredentialEditor() {
         title.setPromptText("Título");
         username.setPromptText("Usuário / e-mail");
         password.setPromptText("Senha do site");
+        Button generatePassword = new Button("Gerar senha");
+        var passwordGenerator = new br.com.cofre.application.PasswordGenerator();
+        generatePassword.setOnAction(event -> password.setText(passwordGenerator.generate()));
         origins.setPromptText("https://conta.exemplo.com (separe origens por vírgulas)");
         notes.setPromptText("Notas");
         notes.setPrefRowCount(NOTES_VISIBLE_ROWS);
@@ -241,22 +298,28 @@ public class VaultApp extends Application {
         Button fresh = new Button("Novo cadastro");
         fresh.setOnAction(
                 e -> {
-                    items.getSelectionModel().clearSelection();
                     clearForm();
+                    showCredentialForm();
                 });
         Button delete = new Button("Excluir selecionada");
         delete.setOnAction(event -> deleteCredential());
+        delete.setDisable(editing == null);
         VBox editor =
                 new VBox(
                         CONTROL_SPACING_PIXELS,
                         new Label("Cadastro / edição"),
-                        title,
-                        username,
-                        password,
-                        origins,
+                        labeledField("Título", title),
+                        labeledField("Usuário / e-mail", username),
+                        labeledField("Senha", passwordControls(password, generatePassword)),
+                        labeledField("Sites permitidos", origins),
                         autofill,
-                        notes,
+                        labeledField("Notas", notes),
                         new HBox(CONTROL_SPACING_PIXELS, save, fresh, delete));
+        editor.getStyleClass().add("card");
+        save.getStyleClass().add("primary-button");
+        delete.getStyleClass().add("danger-button");
+        autofill.setWrapText(true);
+        notes.setWrapText(true);
         HBox.setHgrow(editor, Priority.ALWAYS);
         return editor;
     }
@@ -278,8 +341,7 @@ public class VaultApp extends Application {
                             sites,
                             autofill.isSelected(),
                             notes.getText()));
-            clearForm();
-            refresh();
+            showVault();
             message.setText("Credencial salva.");
         } catch (Exception ex) {
             message.setText(
@@ -295,8 +357,7 @@ public class VaultApp extends Application {
         }
         try {
             vault.delete(editing);
-            clearForm();
-            refresh();
+            showVault();
             message.setText("Credencial excluída.");
         } catch (Exception ex) {
             message.setText("Não foi possível excluir.");
@@ -331,7 +392,10 @@ public class VaultApp extends Application {
                         showRestore();
                     }
                 });
-        return new HBox(CONTROL_SPACING_PIXELS, backupPath, export, restore);
+        HBox controls = new HBox(CONTROL_SPACING_PIXELS, new Label("Backup"), backupPath, export, restore);
+        controls.setAlignment(Pos.CENTER_LEFT);
+        controls.getStyleClass().add("backup-bar");
+        return controls;
     }
 
     private void authenticate(
@@ -440,7 +504,7 @@ public class VaultApp extends Application {
         lock();
         root.getChildren().clear();
         Label heading = new Label("Restaurar backup");
-        heading.setStyle(HEADING_STYLE);
+        heading.getStyleClass().add("page-heading");
         TextField sourcePath = new TextField();
         sourcePath.setPromptText("Caminho completo do arquivo .cofre");
         PasswordField backupPassword = new PasswordField();
@@ -479,11 +543,60 @@ public class VaultApp extends Application {
                         new Label(
                                 "A restauração substitui o cofre inteiro. Salve um backup do cofre"
                                         + " atual antes de continuar."),
-                        sourcePath,
-                        backupPassword,
+                        labeledField("Arquivo de backup", sourcePath),
+                        labeledField("Senha mestra do backup", backupPassword),
                         replace,
                         new HBox(CONTROL_SPACING_PIXELS, submit, back),
                         message);
+        submit.getStyleClass().add("primary-button");
+        replace.setWrapText(true);
+        centerAccessCard();
+    }
+
+    private VBox labeledField(String text, Node control) {
+        Label label = new Label(text);
+        label.getStyleClass().add("field-label");
+        label.setLabelFor(control);
+        return new VBox(LABEL_SPACING_PIXELS, label, control);
+    }
+
+    private HBox passwordControls(PasswordField field, Button generate) {
+        HBox controls = new HBox(CONTROL_SPACING_PIXELS, field, generate);
+        HBox.setHgrow(field, Priority.ALWAYS);
+        return controls;
+    }
+
+    private HBox createHeader(Label heading, Button lockButton) {
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        Label brand = new Label("COFRE LOCAL");
+        brand.getStyleClass().add("brand-label");
+        VBox identity = new VBox(LABEL_SPACING_PIXELS, brand, heading);
+        HBox header = new HBox(SECTION_SPACING_PIXELS, identity, spacer, lockButton);
+        header.setAlignment(Pos.CENTER_LEFT);
+        return header;
+    }
+
+    /** Centraliza as telas de acesso; mensagens longas continuam dentro do cartão. */
+    private void centerAccessCard() {
+        VBox card = new VBox(ROOT_SPACING_PIXELS);
+        card.getStyleClass().add("access-card");
+        card.setMaxWidth(ACCESS_CARD_WIDTH_PIXELS);
+        card.setMaxHeight(Region.USE_PREF_SIZE);
+        List<Node> content = new ArrayList<>(root.getChildren());
+        root.getChildren().clear();
+        Label brand = new Label("COFRE LOCAL");
+        brand.getStyleClass().add("brand-label");
+        card.getChildren().add(brand);
+        card.getChildren().addAll(content);
+        for (Node node : content) {
+            if (node instanceof Label label) {
+                label.setWrapText(true);
+            }
+        }
+        StackPane centered = new StackPane(card);
+        VBox.setVgrow(centered, Priority.ALWAYS);
+        root.getChildren().add(centered);
     }
 
     @FunctionalInterface
@@ -547,11 +660,19 @@ public class VaultApp extends Application {
         }
         try {
             String term = search.getText().toLowerCase(Locale.ROOT);
-            items.getItems()
-                    .setAll(
-                            vault.list().stream()
-                                    .filter(entry -> matchesSearch(entry.credential(), term))
-                                    .toList());
+            List<VaultEntry> matches = vault.list().stream()
+                    .filter(entry -> matchesSearch(entry.credential(), term))
+                    .toList();
+            accountCards.getChildren().clear();
+            if (matches.isEmpty()) {
+                Label empty = new Label("Nenhuma credencial encontrada.");
+                empty.getStyleClass().add("muted-label");
+                accountCards.getChildren().add(empty);
+            } else {
+                for (VaultEntry entry : matches) {
+                    accountCards.getChildren().add(createAccountCard(entry));
+                }
+            }
         } catch (Exception e) {
             lock();
             message.setText("Falha de integridade ou leitura. O cofre foi bloqueado.");
@@ -575,7 +696,7 @@ public class VaultApp extends Application {
     }
 
     private void clearSensitive() {
-        items.getItems().clear();
+        accountCards.getChildren().clear();
         clearForm();
         search.clear();
     }

@@ -1,4 +1,4 @@
-# Cofre local — etapas 1 a 6
+# Cofre local
 
 Aplicativo desktop Java/JavaFX: criação e desbloqueio com senha mestra, cadastro, edição, pesquisa, exclusão, bloqueio, backup e restauração do cofre. A extensão Chrome consulta a sessão e mostra as contas correspondentes ao site aberto pelo host Native Messaging. Implementa os itens 1 a 6 da ordem de implementação, incluindo preenchimento de login mediante clique e automático autorizado por site.
 
@@ -24,6 +24,8 @@ mvn javafx:run "-Djavafx.options=-Dvault.path=C:/caminho/cofre.db"
 ```
 
 Cadastre título, usuário, senha, origens HTTPS (opcionais, separadas por vírgula) e notas. Selecione uma credencial para editá-la ou excluí-la. A pesquisa funciona somente com o cofre desbloqueado.
+
+No cadastro, clique em **Gerar senha** para preencher o campo com uma senha aleatória de 10 caracteres, incluindo maiúsculas, minúsculas, números e símbolos. A geração usa `SecureRandom`; clique em **Salvar** para gravar a credencial no cofre.
 
 ## Extensão e Native Messaging — Windows/Chrome
 

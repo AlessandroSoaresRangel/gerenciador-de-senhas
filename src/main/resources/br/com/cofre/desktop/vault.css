@@ -1,0 +1,71 @@
+.app-root {
+    -fx-background-color: #f2f5fa;
+    -fx-font-family: "Segoe UI";
+    -fx-font-size: 13px;
+    -fx-text-fill: #24324b;
+}
+.label { -fx-text-fill: #24324b; }
+.page-heading { -fx-font-size: 28px; -fx-font-weight: bold; }
+.brand-label { -fx-font-size: 11px; -fx-font-weight: bold; -fx-text-fill: #4169cf; }
+.section-heading { -fx-font-size: 17px; -fx-font-weight: bold; }
+.field-label { -fx-font-size: 12px; -fx-font-weight: bold; -fx-text-fill: #526079; }
+.muted-label { -fx-text-fill: #6b7890; -fx-text-alignment: center; }
+.card, .access-card, .backup-bar {
+    -fx-background-color: white;
+    -fx-background-radius: 16px;
+    -fx-border-color: #e0e6ef;
+    -fx-border-radius: 16px;
+    -fx-padding: 20px;
+}
+.access-card {
+    -fx-padding: 32px;
+    -fx-effect: dropshadow(gaussian, #dce3ee, 24, 0.12, 0, 8);
+}
+.backup-bar { -fx-padding: 14px; }
+.text-field, .text-area {
+    -fx-background-color: #f8fafd;
+    -fx-background-radius: 8px;
+    -fx-border-color: #dce3ee;
+    -fx-border-radius: 8px;
+    -fx-padding: 10px 12px;
+    -fx-prompt-text-fill: #78869c;
+    -fx-text-fill: #24324b;
+    -fx-highlight-fill: #4169cf;
+}
+.text-field:focused, .text-area:focused { -fx-border-color: #4169cf; }
+.text-area .content { -fx-background-color: #f8fafd; -fx-background-radius: 8px; }
+.button {
+    -fx-background-color: #eef2f8;
+    -fx-background-radius: 8px;
+    -fx-text-fill: #344663;
+    -fx-font-weight: bold;
+    -fx-padding: 10px 15px;
+    -fx-cursor: hand;
+}
+.button:hover { -fx-background-color: #e0e7f2; }
+.button:focused { -fx-border-color: #4169cf; -fx-border-radius: 8px; -fx-border-insets: -2px; }
+.primary-button { -fx-background-color: #4169cf; -fx-text-fill: white; }
+.primary-button:hover { -fx-background-color: #3356b5; }
+.danger-button { -fx-background-color: #fff0f0; -fx-text-fill: #b6414c; }
+.danger-button:hover { -fx-background-color: #fbe0e3; }
+.list-view { -fx-background-color: transparent; -fx-border-width: 0; -fx-padding: 0; }
+.list-cell {
+    -fx-background-color: white;
+    -fx-text-fill: #344663;
+    -fx-padding: 14px 10px;
+    -fx-background-radius: 8px;
+    -fx-font-size: 14px;
+}
+.list-cell:filled:hover { -fx-background-color: #f2f5fb; }
+.list-cell:filled:selected { -fx-background-color: #e8efff; -fx-text-fill: #2d55b4; }
+.check-box { -fx-text-fill: #526079; }
+.check-box .box { -fx-background-color: #f8fafd; -fx-border-color: #cbd5e5; -fx-border-radius: 4px; }
+.check-box:selected .mark { -fx-background-color: #4169cf; }
+.status-message { -fx-text-fill: #3356b5; -fx-padding: 8px 0; }
+.scroll-bar { -fx-background-color: transparent; }
+.scroll-bar .thumb { -fx-background-color: #ccd6e5; -fx-background-radius: 6px; }
+
+.cards-scroll, .cards-scroll > .viewport { -fx-background-color: transparent; }
+.cards-scroll { -fx-padding: 2px; -fx-border-width: 0; }
+.account-card { -fx-effect: dropshadow(gaussian, #e0e6ef, 8, 0.08, 0, 2); }
+.account-card:hover { -fx-border-color: #b8c9ee; }

@@ -8,8 +8,8 @@ import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
-import javafx.scene.control.ListView;
 import javafx.scene.layout.Pane;
 import javafx.collections.ListChangeListener;
 import javafx.stage.Stage;
@@ -34,6 +34,10 @@ class VaultAppTest {
         Path database = directory.resolve("extension.db");
         try (var vault = new br.com.cofre.application.VaultService(database)) {
             vault.create("senha mestra fictícia".toCharArray());
+            vault.save(null, new br.com.cofre.domain.Credential("Conta existente", "usuario teste",
+                    "segredo ficticio", List.of(), false, ""));
+            vault.save(null, new br.com.cofre.domain.Credential("Outra conta existente", "outro usuario",
+                    "outro segredo ficticio", List.of(), false, ""));
         }
         var application = new VaultApp();
         var stageReference = new CompletableFuture<Stage>();
@@ -53,7 +57,11 @@ class VaultAppTest {
             runOnJavaFx(() -> {
                 Parent root = stageReference.join().getScene().getRoot();
                 assertTrue(hasLabel(root, "Minhas credenciais"));
+                assertTrue(hasLabel(root, "Conta existente"));
+                assertTrue(hasLabel(root, "Outra conta existente"));
+                assertFalse(descendants(root).anyMatch(PasswordField.class::isInstance));
                 button(root, "Bloquear agora").fire();
+                assertFalse(hasLabel(root, "Conta existente"));
                 assertTrue(hasLabel(root, "Cofre bloqueado"));
             });
         } finally {
@@ -107,35 +115,58 @@ class VaultAppTest {
             unlocked.get(JAVAFX_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             runOnJavaFx(() -> {
                 Parent root = stageReference.join().getScene().getRoot();
+                assertFalse(descendants(root).anyMatch(PasswordField.class::isInstance));
+                button(root, "Adicionar conta").fire();
+                textField(root, "Título").setText("Rascunho");
+                button(root, "Voltar para contas").fire();
+                assertFalse(hasLabel(root, "Rascunho"));
+                button(root, "Adicionar conta").fire();
+                assertEquals("", textField(root, "Título").getText());
                 textField(root, "Título").setText("Conta de teste");
                 textField(root, "Usuário / e-mail").setText("usuário fictício");
-                textField(root, "Senha do site").setText("senha fictícia");
+                button(root, "Gerar senha").fire();
+                String generatedPassword = textField(root, "Senha do site").getText();
+                assertEquals(10, generatedPassword.length());
+                assertTrue(generatedPassword.chars().anyMatch(Character::isUpperCase));
+                assertTrue(generatedPassword.chars().anyMatch(Character::isLowerCase));
+                assertTrue(generatedPassword.chars().anyMatch(Character::isDigit));
+                assertTrue(generatedPassword.chars().anyMatch(character -> !Character.isLetterOrDigit(character)));
                 button(root, "Salvar").fire();
                 assertTrue(hasLabel(root, "Credencial salva."));
-                ListView<?> entries = descendants(root)
-                        .filter(ListView.class::isInstance)
-                        .map(ListView.class::cast)
-                        .findFirst().orElseThrow();
-                assertEquals(1, entries.getItems().size());
+                assertTrue(hasLabel(root, "Conta de teste"));
+                assertTrue(hasLabel(root, "usuário fictício"));
+                assertFalse(descendants(root).anyMatch(PasswordField.class::isInstance));
+                assertFalse(hasLabel(root, generatedPassword));
+                button(root, "Adicionar conta").fire();
+                textField(root, "Título").setText("Segunda conta");
+                textField(root, "Senha do site").setText("senha fictícia");
+                button(root, "Salvar").fire();
+                assertTrue(hasLabel(root, "Conta de teste"));
+                assertTrue(hasLabel(root, "Segunda conta"));
                 TextField search = textField(root, "Pesquisar título, usuário ou site");
                 search.setText("inexistente");
-                assertTrue(entries.getItems().isEmpty());
+                assertFalse(hasLabel(root, "Conta de teste"));
+                assertTrue(hasLabel(root, "Nenhuma credencial encontrada."));
+                search.setText("Segunda");
+                assertTrue(hasLabel(root, "Segunda conta"));
+                assertFalse(hasLabel(root, "Conta de teste"));
                 search.clear();
-                assertEquals(1, entries.getItems().size());
-                entries.getSelectionModel().selectFirst();
-                assertEquals("Conta de teste", textField(root, "Título").getText());
+                editCard(root, "Conta de teste").fire();
+                assertEquals(generatedPassword, textField(root, "Senha do site").getText());
                 textField(root, "Título").setText("Conta editada");
                 button(root, "Salvar").fire();
-                assertEquals(1, entries.getItems().size());
-                entries.getSelectionModel().selectFirst();
-                assertEquals("Conta editada", textField(root, "Título").getText());
+                assertTrue(hasLabel(root, "Conta editada"));
+                assertFalse(hasLabel(root, "Conta de teste"));
+                editCard(root, "Conta editada").fire();
                 button(root, "Excluir selecionada").fire();
-                assertTrue(entries.getItems().isEmpty());
+                assertFalse(hasLabel(root, "Conta editada"));
                 assertTrue(hasLabel(root, "Credencial excluída."));
+                editCard(root, "Segunda conta").fire();
                 TextField passwordField = textField(root, "Senha do site");
                 button(root, "Bloquear agora").fire();
                 assertTrue(hasLabel(root, "Cofre bloqueado"));
                 assertEquals("", passwordField.getText());
+                assertFalse(hasLabel(root, "Segunda conta"));
             });
         } finally {
             runOnJavaFx(() -> {
@@ -238,12 +269,25 @@ class VaultAppTest {
     }
 
     private static Stream<Node> descendants(Node node) {
+        // O conteúdo existe antes do primeiro pulso que cria a skin do ScrollPane.
+        if (node instanceof ScrollPane scroll && scroll.getContent() != null) {
+            return Stream.concat(Stream.of(node), descendants(scroll.getContent()));
+        }
         Stream<Node> children =
                 node instanceof Parent parent
                         ? parent.getChildrenUnmodifiable().stream()
                                 .flatMap(VaultAppTest::descendants)
                         : Stream.empty();
         return Stream.concat(Stream.of(node), children);
+    }
+
+    private static Button editCard(Parent root, String title) {
+        Parent card = descendants(root)
+                .filter(node -> node.getStyleClass().contains("account-card"))
+                .map(Parent.class::cast)
+                .filter(node -> hasLabel(node, title))
+                .findFirst().orElseThrow();
+        return button(card, "Editar conta");
     }
 
     private static Button button(Parent root, String text) {

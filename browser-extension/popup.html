@@ -1,9 +1,36 @@
 <!doctype html>
-<html lang="pt-BR"><head><meta charset="UTF-8"><title>Cofre local</title><link rel="stylesheet" href="popup.css"></head>
-<body><h1>Cofre local</h1><p id="status" role="status" aria-live="polite">Consultando…</p>
-<form id="unlock-form" hidden>
-  <label for="master-password">Senha mestra</label>
-  <input id="master-password" type="password" autocomplete="off" maxlength="4096" required>
-  <button id="unlock" type="submit">Desbloquear cofre</button>
-</form>
-<p id="origin"></p><ul id="accounts"></ul><button id="refresh">Atualizar</button><script type="module" src="dist/popup.js"></script></body></html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cofre local</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="header">
+    <span class="brand-label">COFRE LOCAL</span>
+    <h1>Suas contas, por perto</h1>
+    <p class="subtitle">Acesse suas credenciais para o site atual.</p>
+  </header>
+  <main>
+    <section class="card" aria-label="Status do cofre">
+      <h2>Seu cofre</h2>
+      <p id="status" role="status" aria-live="polite">Consultando…</p>
+      <form id="unlock-form" hidden>
+        <label for="master-password">Senha mestra</label>
+        <input id="master-password" type="password" autocomplete="off" maxlength="4096" required>
+        <button id="unlock" class="primary-button" type="submit">Desbloquear cofre</button>
+      </form>
+    </section>
+    <section aria-label="Contas do site atual">
+      <p id="origin"></p>
+      <ul id="accounts" aria-label="Contas disponíveis"></ul>
+    </section>
+  </main>
+  <footer>
+    <span class="footer-label">Credenciais do seu cofre local</span>
+    <button id="refresh" type="button">Atualizar</button>
+  </footer>
+  <script type="module" src="dist/popup.js"></script>
+</body>
+</html>
