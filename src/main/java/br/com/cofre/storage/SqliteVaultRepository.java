@@ -19,12 +19,17 @@ public final class SqliteVaultRepository implements VaultRepository {
                 nonce = excluded.nonce,
                 ciphertext = excluded.ciphertext
             """;
-    private final Connection connection;
+    private final Path databasePath;
+    private Connection connection;
 
     public SqliteVaultRepository(Path path) throws Exception {
-        Path absolute = path.toAbsolutePath();
-        Files.createDirectories(absolute.getParent());
-        connection = DriverManager.getConnection("jdbc:sqlite:" + absolute);
+        databasePath = path.toAbsolutePath().normalize();
+        Files.createDirectories(databasePath.getParent());
+        connection = openDatabase();
+    }
+
+    private Connection openDatabase() throws SQLException {
+        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA busy_timeout=" + BUSY_TIMEOUT_MILLIS);
             statement.execute(
@@ -53,6 +58,24 @@ public final class SqliteVaultRepository implements VaultRepository {
             connection.close();
             throw failure;
         }
+        return connection;
+    }
+
+    /** Fecha o SQLite antes de excluir o arquivo; reabre o banco para permitir um novo cadastro. */
+    @Override
+    public void deleteVault() throws Exception {
+        connection.close();
+        try {
+            Files.deleteIfExists(databasePath);
+        } catch (Exception failure) {
+            try {
+                connection = openDatabase();
+            } catch (Exception reopeningFailure) {
+                failure.addSuppressed(reopeningFailure);
+            }
+            throw failure;
+        }
+        connection = openDatabase();
     }
 
     @Override

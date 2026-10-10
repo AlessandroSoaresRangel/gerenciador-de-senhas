@@ -19,6 +19,8 @@ public interface VaultRepository extends AutoCloseable {
 
     void replace(VaultSnapshot snapshot) throws SQLException;
 
+    void deleteVault() throws Exception;
+
     @Override
     void close() throws SQLException;
 }

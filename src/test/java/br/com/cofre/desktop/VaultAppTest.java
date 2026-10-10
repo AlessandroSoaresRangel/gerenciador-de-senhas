@@ -13,6 +13,8 @@ import javafx.scene.control.TextField;
 import javafx.scene.layout.Pane;
 import javafx.collections.ListChangeListener;
 import javafx.stage.Stage;
+import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -39,7 +41,8 @@ class VaultAppTest {
             vault.save(null, new br.com.cofre.domain.Credential("Outra conta existente", "outro usuario",
                     "outro segredo ficticio", List.of(), false, ""));
         }
-        var application = new VaultApp();
+        var tray = new RecordingTray();
+        var application = new VaultApp(tray);
         var stageReference = new CompletableFuture<Stage>();
         String previousPath = System.getProperty("vault.path");
         try {
@@ -60,13 +63,29 @@ class VaultAppTest {
                 assertTrue(hasLabel(root, "Conta existente"));
                 assertTrue(hasLabel(root, "Outra conta existente"));
                 assertFalse(descendants(root).anyMatch(PasswordField.class::isInstance));
+                Stage stage = stageReference.join();
+                closeWindowChoosing(stage, "Cancelar");
+                assertTrue(stage.isShowing());
+                assertTrue(hasLabel(root, "Minhas credenciais"));
+                assertNull(tray.openWindow);
+                closeWindowChoosing(stage, "Manter em segundo plano");
+                assertFalse(stage.isShowing());
+                assertNotNull(tray.openWindow);
+                assertTrue(hasLabel(root, "Conta existente"));
+                tray.openWindow.run();
+                assertTrue(stage.isShowing());
+                assertTrue(hasLabel(root, "Minhas credenciais"));
+                stage.setIconified(true);
+                assertTrue(hasLabel(root, "Conta existente"));
+                stage.setIconified(false);
                 button(root, "Bloquear agora").fire();
-                assertFalse(hasLabel(root, "Conta existente"));
                 assertTrue(hasLabel(root, "Cofre bloqueado"));
+                assertFalse(hasLabel(root, "Conta existente"));
             });
         } finally {
             runOnJavaFx(() -> {
                 application.stop();
+                assertTrue(tray.closed);
                 stageReference.join().hide();
                 if (previousPath == null) {
                     System.clearProperty("vault.path");
@@ -86,6 +105,100 @@ class VaultAppTest {
                     initialized.complete(null);
                 });
         initialized.get(15, TimeUnit.SECONDS);
+    }
+
+    private static void closeWindowChoosing(Stage stage, String choice) {
+        Platform.runLater(() -> {
+            Window dialog = Window.getWindows().stream()
+                    .filter(window -> window != stage && window.isShowing())
+                    .filter(window -> window instanceof Stage dialogStage
+                            && "Fechar Cofre local".equals(dialogStage.getTitle()))
+                    .findFirst().orElseThrow();
+            button(dialog.getScene().getRoot(), choice).fire();
+        });
+        stage.fireEvent(new WindowEvent(stage, WindowEvent.WINDOW_CLOSE_REQUEST));
+    }
+
+    @Test
+    void deletionRequiresTypedConfirmationAndReturnsToCreationScreen() throws Exception {
+        Path database = directory.resolve("delete-ui.db");
+        try (var vault = new br.com.cofre.application.VaultService(database)) {
+            vault.create("senha fictícia de teste".toCharArray());
+        }
+        var application = new VaultApp();
+        var stageReference = new CompletableFuture<Stage>();
+        var deleted = new CompletableFuture<Void>();
+        String previousPath = System.getProperty("vault.path");
+        try {
+            runOnJavaFx(() -> {
+                System.setProperty("vault.path", database.toString());
+                Stage stage = new Stage();
+                stageReference.complete(stage);
+                application.start(stage);
+                Pane root = (Pane) stage.getScene().getRoot();
+                Platform.runLater(() -> {
+                    Parent dialog = deletionDialogRoot(stage);
+                    assertTrue(button(dialog, "Excluir definitivamente").isDisabled());
+                    button(dialog, "Cancelar").fire();
+                });
+                button(root, "Excluir cofre e começar do zero").fire();
+                assertTrue(hasLabel(root, "Cofre bloqueado"));
+                root.getChildren().addListener((ListChangeListener<Node>) change -> {
+                    if (hasLabel(root, "Crie seu cofre local")) {
+                        deleted.complete(null);
+                    }
+                });
+                Platform.runLater(() -> {
+                    Parent dialog = deletionDialogRoot(stage);
+                    TextField confirmation = textField(dialog, "Digite EXCLUIR");
+                    confirmation.setText("excluir");
+                    assertTrue(button(dialog, "Excluir definitivamente").isDisabled());
+                    confirmation.setText("EXCLUIR");
+                    assertFalse(button(dialog, "Excluir definitivamente").isDisabled());
+                    button(dialog, "Excluir definitivamente").fire();
+                });
+                button(root, "Excluir cofre e começar do zero").fire();
+            });
+            deleted.get(JAVAFX_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            runOnJavaFx(() -> {
+                Parent root = stageReference.join().getScene().getRoot();
+                assertTrue(hasLabel(root, "Crie seu cofre local"));
+                assertTrue(hasLabel(root, "Cofre excluído. Crie uma nova senha mestra para começar do zero."));
+                assertFalse(descendants(root).filter(Button.class::isInstance).map(Button.class::cast)
+                        .anyMatch(button -> "Excluir cofre e começar do zero".equals(button.getText())));
+            });
+        } finally {
+            runOnJavaFx(() -> {
+                application.stop();
+                stageReference.join().hide();
+                if (previousPath == null) {
+                    System.clearProperty("vault.path");
+                } else {
+                    System.setProperty("vault.path", previousPath);
+                }
+            });
+        }
+    }
+
+    private static Parent deletionDialogRoot(Stage owner) {
+        return Window.getWindows().stream()
+                .filter(window -> window != owner && window.isShowing())
+                .filter(window -> window instanceof Stage stage && "Excluir cofre".equals(stage.getTitle()))
+                .findFirst().orElseThrow().getScene().getRoot();
+    }
+
+    private static final class RecordingTray implements DesktopTray {
+        private Runnable openWindow;
+        private boolean closed;
+
+        @Override
+        public boolean install(Runnable openWindow, Runnable exitApplication) {
+            this.openWindow = openWindow;
+            return true;
+        }
+
+        @Override
+        public void close() { closed = true; }
     }
 
     @Test

@@ -32,7 +32,7 @@ h2 { margin: 0 0 8px; font-size: 16px; }
 #unlock-form:not([hidden]) { display: grid; gap: 10px; margin-top: 18px; }
 [hidden] { display: none !important; }
 label { color: var(--muted); font-size: 12px; font-weight: 600; }
-#master-password {
+#master-password, .text-field {
   width: 100%;
   min-height: 40px;
   padding: 10px 12px;
@@ -69,3 +69,9 @@ input:disabled { opacity: 0.65; }
 #accounts li:last-child button:hover { background: #e0e7f2; }
 footer { display: flex; align-items: center; gap: 12px; justify-content: space-between; margin-top: 20px; }
 .footer-label { color: var(--muted); font-size: 11px; }
+
+body.save-window { width: auto; max-width: 420px; margin: auto; }
+#save-account-form { display: grid; gap: 10px; }
+#capture-origin, #capture-username { overflow-wrap: anywhere; }
+#capture-origin { color: var(--accent); font-weight: 600; }
+#capture-status { color: var(--muted); font-size: 12px; }

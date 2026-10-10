@@ -228,17 +228,12 @@ public final class VaultService implements AutoCloseable {
         }
     }
 
-    /** Rejeita a lista inteira e bloqueia a sessão se algum registro não puder ser validado. */
+    /** Rejeita a lista inteira se um registro falhar na validação, sem bloquear a sessão. */
     public synchronized List<VaultEntry> list() throws Exception {
         requireUnlocked();
         List<VaultEntry> entries = new ArrayList<>();
-        try {
-            for (var item : repository.readItems()) {
-                entries.add(credentialCipher.decrypt(item, vaultKey));
-            }
-        } catch (Exception failure) {
-            lock();
-            throw failure;
+        for (var item : repository.readItems()) {
+            entries.add(credentialCipher.decrypt(item, vaultKey));
         }
         entries.sort(
                 Comparator.comparing(
@@ -254,6 +249,23 @@ public final class VaultService implements AutoCloseable {
         return itemId;
     }
 
+    /** O cadastro confirmado pela extensão não sobrescreve outra conta do mesmo usuário e origem. */
+    public synchronized boolean saveNewAccount(String origin, String title, String username, String password)
+            throws Exception {
+        requireUnlocked();
+        String normalizedOrigin = Credential.origin(origin);
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("Informe o usuário.");
+        }
+        String normalizedUsername = username.trim();
+        if (listMatches(normalizedOrigin).stream()
+                .anyMatch(account -> account.username().trim().equals(normalizedUsername))) {
+            return false;
+        }
+        save(null, new Credential(title, normalizedUsername, password, List.of(normalizedOrigin), false, ""));
+        return true;
+    }
+
     public synchronized void delete(String id) throws SQLException {
         requireUnlocked();
         fillAuthorizations.clear();
@@ -264,6 +276,12 @@ public final class VaultService implements AutoCloseable {
         fillAuthorizations.clear();
         wipe(vaultKey);
         vaultKey = null;
+    }
+
+    /** Exclusão explícita dispensa a senha antiga e invalida a sessão e autorizações. */
+    public synchronized void deleteVault() throws Exception {
+        lock();
+        repository.deleteVault();
     }
 
     private void requireUnlocked() {

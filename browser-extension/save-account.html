@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Salvar conta — Cofre local</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body class="save-window">
+  <header class="header">
+    <span class="brand-label">COFRE LOCAL</span>
+    <h1>Salvar esta conta?</h1>
+    <p class="subtitle">Você enviou um login que ainda não está cadastrado neste site.</p>
+  </header>
+  <main class="card">
+    <p id="capture-origin"></p>
+    <p id="capture-username"></p>
+    <form id="save-account-form">
+      <label for="capture-title">Nome da conta</label>
+      <input id="capture-title" class="text-field" maxlength="512" required>
+      <p id="capture-status" role="status" aria-live="polite">Preparando confirmação…</p>
+      <button id="save-account" class="primary-button" type="submit" disabled>Salvar no cofre</button>
+      <button id="cancel-save" type="button">Agora não</button>
+    </form>
+  </main>
+  <script type="module" src="dist/save-account.js"></script>
+</body>
+</html>

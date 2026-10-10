@@ -27,6 +27,12 @@ Cadastre título, usuário, senha, origens HTTPS (opcionais, separadas por vírg
 
 No cadastro, clique em **Gerar senha** para preencher o campo com uma senha aleatória de 10 caracteres, incluindo maiúsculas, minúsculas, números e símbolos. A geração usa `SecureRandom`; clique em **Salvar** para gravar a credencial no cofre.
 
+Na tela da senha mestra, **Excluir cofre e começar do zero** permite apagar o banco atual sem conhecer a senha antiga. Digite **EXCLUIR** e confirme **Excluir definitivamente**. Todas as contas e a senha mestra antiga são removidas; o aplicativo prepara um banco vazio e abre a criação de uma nova senha mestra. Os arquivos de backup existentes são preservados. Cancelar a confirmação mantém o cofre atual.
+
+Ao clicar no botão de fechar a janela, escolha **Manter em segundo plano**, **Encerrar aplicativo** ou **Cancelar**. Manter em segundo plano preserva a sessão e coloca um ícone na bandeja do sistema, perto do relógio. Use o menu do ícone para **Abrir Cofre local** ou **Encerrar aplicativo**; a ação padrão do ícone também reabre a janela. O aplicativo continua disponível para a extensão com o estado atual do cofre.
+
+A integração usa a bandeja do sistema disponível no Windows e em ambientes Linux compatíveis com `java.awt.SystemTray`. O suporte no Linux depende do ambiente gráfico e de sua configuração de bandeja. Se o sistema não oferecer a bandeja ou recusar a criação do ícone, a janela permanece minimizada na barra de tarefas, permitindo reabri-la normalmente.
+
 ## Extensão e Native Messaging — Windows/Chrome
 
 Requisitos adicionais: Node.js 22+, npm e um JDK com `jpackage`. A instalação do host é por usuário, sem privilégios de administrador.
@@ -51,7 +57,7 @@ O instalador compila o host, gera um executável com runtime Java em `%LOCALAPPD
 
 Com o cofre desbloqueado e um site HTTPS aberto, o popup lista título e usuário das contas que tenham aquela origem cadastrada. Por exemplo, para a página `https://conta.exemplo.com/login`, cadastre `https://conta.exemplo.com` na credencial. Subdomínios diferentes, portas não padrão e domínios semelhantes não correspondem. HTTP e páginas internas do navegador são recusados.
 
-A consulta usa `LIST_MATCHES` e devolve somente ID, título e usuário; não envia senha, notas ou todas as origens cadastradas. A origem vem da API de abas do navegador, com permissão temporária `activeTab` ao abrir a extensão. Se a aba navegar durante a consulta, a resposta é descartada. O popup consulta ao abrir e ao clicar em Atualizar, sem consultas periódicas. Os resultados refletem a última consulta; alterações na sessão são exibidas na próxima atualização. Se a consulta informar bloqueio, aplicativo fechado ou falha, a lista é removida. O botão **Preencher** de cada conta insere usuário e senha somente após seu clique. O envio do formulário fica a seu cargo.
+A consulta usa `LIST_MATCHES` e devolve somente ID, título e usuário; não envia senha, notas ou todas as origens cadastradas. A origem vem da API de abas do navegador; a permissão `tabs` permite identificar o site nas consultas automáticas. A permissão `activeTab` continua sendo usada para preencher mediante clique. Se a aba navegar durante a consulta, a resposta é descartada. A extensão consulta as contas automaticamente ao concluir uma navegação HTTPS na aba ativa, incluindo recarregamentos. Ao ativar uma aba ainda não consultada, faz a consulta. Eventos repetidos da mesma visita não repetem a consulta enquanto o service worker permanece ativo; reiniciar o worker reinicia esse controle. O indicador no ícone mostra a quantidade de contas encontradas e é limpo na próxima navegação ou em caso de falha. O aplicativo precisa estar aberto e o cofre desbloqueado. O popup também consulta ao abrir e ao clicar em Atualizar, sem consultas periódicas. Os resultados refletem a última consulta; alterações na sessão são exibidas na próxima atualização. Se a consulta informar bloqueio, aplicativo fechado ou falha, a lista é removida. O botão **Preencher** de cada conta insere usuário e senha somente após seu clique. O envio do formulário fica a seu cargo.
 
 O preenchimento aceita um único formulário de login visível no documento principal, com um campo de usuário e um de senha. HTTP, iframes, formulários ambíguos, campos ocultos, campos `new-password` e formulários que enviam para outra origem são recusados. Formulários sem elemento `form`, Shadow DOM e login em múltiplas etapas ainda não são suportados. A permissão `scripting` executa a inspeção e o preenchimento no mundo isolado, usando o acesso temporário de `activeTab`.
 
@@ -59,11 +65,19 @@ A liberação é vinculada à conta, origem e documento, com autorização de us
 
 Ao atualizar de uma etapa anterior: execute novamente `npm.cmd test` na pasta da extensão, recarregue a extensão em `chrome://extensions`, reexecute o instalador do host com o mesmo ID e reinicie o desktop. O executável anteriormente instalado não aceita o novo comando até ser atualizado.
 
-Alternar para o navegador ou abrir o popup não bloqueia o cofre. A inatividade é medida pelas interações no desktop: consultar o estado pela extensão não renova o prazo de 5 minutos.
+O cofre não tem bloqueio por inatividade, suspensão, minimização ou envio à bandeja. A sessão permanece no estado escolhido pelo usuário; use **Bloquear agora** para bloqueá-la.
+
+### Oferecer cadastro após enviar um login
+
+Ao enviar um formulário HTTPS com usuário e senha, a extensão consulta as contas da origem exata do site. Se o usuário ainda não estiver cadastrado, abre uma janela privada **Salvar esta conta?**, com o site, usuário, nome editável e as opções **Salvar no cofre** e **Agora não**. O envio do formulário continua normalmente; essa detecção não confirma se o login foi aceito pelo site.
+
+O aplicativo deve estar aberto e o cofre desbloqueado para oferecer e gravar o cadastro. A confirmação cria uma conta com a origem do site e preenchimento automático desabilitado; não sobrescreve um usuário já cadastrado para essa origem. O rascunho permanece temporariamente em memória, expira em dois minutos e é descartado ao cancelar ou fechar a janela. A senha não vai para `storage`, URL, logs ou elementos visíveis da página; somente a janela privada de confirmação recebe o rascunho antes de encaminhar o cadastro confirmado ao desktop.
+
+O content script é executado no frame principal das páginas HTTPS e observa o evento de envio do formulário. Formulários com múltiplas senhas, `new-password`, campos ocultos ou ação em outra origem são ignorados. Logins em várias etapas, iframes e páginas que não enviam um formulário HTML não estão cobertos por essa detecção. Recarregue a extensão e as páginas abertas após atualizar. No Windows, execute novamente `scripts/install-native-host.ps1` para atualizar o host com o comando de cadastro, e reinicie o desktop.
 
 ### Desbloquear pela extensão
 
-Com o aplicativo desktop aberto e o cofre bloqueado, abra o popup, digite a senha mestra e clique em **Desbloquear cofre**. A extensão desbloqueia a mesma sessão usada pelo desktop, atualiza a tela do aplicativo e consulta novamente as contas do site. Um desbloqueio bem-sucedido reinicia o prazo de inatividade.
+Com o aplicativo desktop aberto e o cofre bloqueado, abra o popup, digite a senha mestra e clique em **Desbloquear cofre**. A extensão desbloqueia a mesma sessão usada pelo desktop, atualiza a tela do aplicativo e consulta novamente as contas do site.
 
 Se o desktop estiver fechado, a extensão pede para abri-lo; o host não abre o banco nem inicia outra sessão. A criação do cofre continua no desktop. Uma senha incorreta mantém o cofre bloqueado. Operações desktop em curso recusam o pedido, e um bloqueio durante o processamento invalida o desbloqueio pendente.
 
@@ -102,7 +116,7 @@ O limite de arquivo é 64 MiB. A exportação publica somente o arquivo completo
 - Argon2id v1.3: 64 MiB, 3 iterações e paralelismo 1, salt aleatório de 16 bytes.
 - Chave aleatória de 256 bits, protegida pela chave derivada da senha mestra. AES-256-GCM com nonce aleatório de 96 bits em cada gravação e autenticação do ID/versão do registro.
 - Títulos, usuários, senhas, origens e notas ficam dentro do conteúdo criptografado; não há índice em texto aberto. A senha mestra não é persistida.
-- Bloqueio manual, após 5 minutos sem interação no desktop ou ao minimizar. Alternar para outra janela mantém a sessão desbloqueada para permitir usar a extensão. Uma pausa do relógio de eventos acima de 10 segundos bloqueia o cofre ao retomar da suspensão; não há integração nativa com eventos de bloqueio do Windows nesta etapa.
+- Bloqueio por escolha do usuário em **Bloquear agora**. Encerrar o aplicativo apaga a chave da sessão; restaurar um backup exige desbloqueio com a senha do backup. Falhas de leitura ou integridade recusam os dados e preservam o estado da sessão.
 - O bloqueio limpa a chave ativa e os campos/lista da interface. Strings e cópias internas da JVM não têm garantia de apagamento imediato da memória.
 - Não há recuperação de senha mestra: sem a senha usada na criação do backup, ele não pode ser restaurado. O banco ainda expõe metadados como quantidade e tamanho dos registros; o backup expõe o cabeçalho criptográfico e o tamanho total.
 

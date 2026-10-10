@@ -7,9 +7,8 @@ import br.com.cofre.ipc.StatusServer;
 import br.com.cofre.nativehost.FillProtocol;
 import br.com.cofre.nativehost.StatusProtocol;
 import br.com.cofre.nativehost.UnlockProtocol;
+import br.com.cofre.nativehost.SaveAccountProtocol;
 
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -17,10 +16,8 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
-import javafx.scene.input.InputEvent;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
-import javafx.util.Duration;
 
 import java.nio.file.Path;
 import java.util.*;
@@ -37,15 +34,14 @@ public class VaultApp extends Application {
     private static final int ACCOUNT_CARD_WIDTH_PIXELS = 300;
     private static final int EDITOR_WIDTH_PIXELS = 720;
     private static final int NOTES_VISIBLE_ROWS = 4;
-    private static final int SESSION_CHECK_INTERVAL_SECONDS = 1;
-    private static final int MAX_TIMER_PAUSE_SECONDS = 10;
-    private static final int INACTIVITY_TIMEOUT_MINUTES = 5;
     private static final int ACCESS_CARD_WIDTH_PIXELS = 480;
     private static final int MIN_WINDOW_WIDTH_PIXELS = 960;
     private static final int MIN_WINDOW_HEIGHT_PIXELS = 740;
 
     private VaultService vault;
     private StatusServer statusServer;
+    private final DesktopTray desktopTray;
+    private WindowLifecycle windowLifecycle;
     private final VBox root = new VBox(ROOT_SPACING_PIXELS);
     private final Label message = new Label();
     private final ExecutorService worker =
@@ -55,9 +51,6 @@ public class VaultApp extends Application {
                         workerThread.setDaemon(true);
                         return workerThread;
                     });
-    private Timeline timer;
-    private long lastActivityNanos = System.nanoTime();
-    private long lastTickNanos = lastActivityNanos;
     private int generation;
     private boolean busy;
     private boolean listenersBound;
@@ -73,6 +66,14 @@ public class VaultApp extends Application {
     private final TextArea notes = new TextArea();
     private String editing;
 
+    public VaultApp() {
+        this(new AwtDesktopTray());
+    }
+
+    VaultApp(DesktopTray desktopTray) {
+        this.desktopTray = Objects.requireNonNull(desktopTray);
+    }
+
     @Override
     public void start(Stage stage) throws Exception {
         String custom = System.getProperty("vault.path");
@@ -85,7 +86,12 @@ public class VaultApp extends Application {
                 new StatusServer(
                         path.toAbsolutePath().getParent().resolve("ipc/endpoint.json"),
                         new StatusProtocol(vault::status, vault::listMatches, new FillProtocol(vault),
-                                new UnlockProtocol(this::unlockFromExtension)));
+                                new UnlockProtocol(this::unlockFromExtension),
+                                new SaveAccountProtocol(vault, () -> Platform.runLater(() -> {
+                                    if (!stopped && vault.unlocked()) {
+                                        refresh();
+                                    }
+                                }))));
         root.setPadding(new Insets(WINDOW_PADDING_PIXELS));
         root.getStyleClass().add("app-root");
         message.getStyleClass().add("status-message");
@@ -96,39 +102,68 @@ public class VaultApp extends Application {
                 VaultApp.class.getResource("vault.css"), "Tema da interface ausente").toExternalForm());
         stage.setMinWidth(MIN_WINDOW_WIDTH_PIXELS);
         stage.setMinHeight(MIN_WINDOW_HEIGHT_PIXELS);
-        scene.addEventFilter(InputEvent.ANY, event -> lastActivityNanos = System.nanoTime());
         stage.setTitle("Cofre local");
         stage.setScene(scene);
-        // Alternar para o navegador deve manter a sessão disponível à extensão.
-        stage.iconifiedProperty()
-                .addListener(
-                        (observable, previouslyMinimized, minimized) -> {
-                            if (minimized) {
-                                lock();
-                            }
-                        });
-        timer =
-                new Timeline(
-                        new KeyFrame(
-                                Duration.seconds(SESSION_CHECK_INTERVAL_SECONDS),
-                                event -> checkSessionTimeout()));
-        timer.setCycleCount(Timeline.INDEFINITE);
-        timer.play();
+        configureWindowLifecycle(stage);
         showLocked();
         stage.show();
     }
 
-    /** Uma pausa longa entre verificações sugere suspensão; ao retomar, bloqueia por precaução. */
-    private void checkSessionTimeout() {
-        long nowNanos = System.nanoTime();
-        boolean timerInterrupted =
-                nowNanos - lastTickNanos > TimeUnit.SECONDS.toNanos(MAX_TIMER_PAUSE_SECONDS);
-        boolean inactive =
-                nowNanos - lastActivityNanos > TimeUnit.MINUTES.toNanos(INACTIVITY_TIMEOUT_MINUTES);
-        if (timerInterrupted || inactive) {
-            lock();
+    private void configureWindowLifecycle(Stage stage) {
+        windowLifecycle = new WindowLifecycle(desktopTray, new WindowLifecycle.Window() {
+            @Override
+            public void hide() {
+                Platform.setImplicitExit(false);
+                stage.hide();
+            }
+
+            @Override
+            public void minimize() {
+                stage.setIconified(true);
+                message.setText("Bandeja indisponível neste ambiente. O aplicativo permanece na barra de tarefas.");
+            }
+
+            @Override
+            public void restore() {
+                if (!stopped) {
+                    stage.setIconified(false);
+                    stage.show();
+                    stage.toFront();
+                    stage.requestFocus();
+                }
+            }
+
+            @Override
+            public void exit() { Platform.exit(); }
+        });
+        stage.setOnCloseRequest(event -> {
+            if (!stopped) {
+                event.consume();
+                windowLifecycle.requestClose(askCloseChoice(stage));
+            }
+        });
+    }
+
+    private WindowLifecycle.CloseChoice askCloseChoice(Stage stage) {
+        ButtonType keepRunning = new ButtonType("Manter em segundo plano", ButtonBar.ButtonData.YES);
+        ButtonType exit = new ButtonType("Encerrar aplicativo", ButtonBar.ButtonData.NO);
+        ButtonType cancel = new ButtonType("Cancelar", ButtonBar.ButtonData.CANCEL_CLOSE);
+        Alert dialog = new Alert(Alert.AlertType.CONFIRMATION,
+                "Deseja manter o aplicativo na bandeja do sistema, perto do relógio?\n"
+                        + "A sessão atual será mantida. Se a bandeja não estiver disponível, a janela será minimizada.",
+                keepRunning, exit, cancel);
+        dialog.initOwner(stage);
+        dialog.setTitle("Fechar Cofre local");
+        dialog.setHeaderText("Manter o aplicativo em segundo plano?");
+        dialog.getDialogPane().getStylesheets().addAll(stage.getScene().getStylesheets());
+        ButtonType selected = dialog.showAndWait().orElse(cancel);
+        if (selected == keepRunning) {
+            return WindowLifecycle.CloseChoice.KEEP_RUNNING;
         }
-        lastTickNanos = nowNanos;
+        if (selected == exit) {
+            return WindowLifecycle.CloseChoice.EXIT;
+        }
+        return WindowLifecycle.CloseChoice.CANCEL;
     }
 
     /**
@@ -187,11 +222,72 @@ public class VaultApp extends Application {
                                                                     ".cofre-local",
                                                                     "vault.db")
                                                             .toString()))));
+            if (!creating) {
+                Button reset = new Button("Excluir cofre e começar do zero");
+                reset.getStyleClass().add("danger-button");
+                reset.setMaxWidth(Double.MAX_VALUE);
+                reset.setOnAction(event -> confirmVaultDeletion());
+                root.getChildren().add(root.getChildren().indexOf(message), reset);
+            }
             centerAccessCard();
         } catch (Exception e) {
             message.setText("Não foi possível acessar o arquivo do cofre.");
             root.getChildren().add(message);
         }
+    }
+
+    private void confirmVaultDeletion() {
+        if (busy) {
+            return;
+        }
+        ButtonType delete = new ButtonType("Excluir definitivamente", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancel = new ButtonType("Cancelar", ButtonBar.ButtonData.CANCEL_CLOSE);
+        Alert dialog = new Alert(Alert.AlertType.WARNING, "", delete, cancel);
+        dialog.initOwner(root.getScene().getWindow());
+        dialog.setTitle("Excluir cofre");
+        dialog.setHeaderText("Excluir todas as contas e a senha mestra?");
+        TextField confirmation = new TextField();
+        confirmation.setPromptText("Digite EXCLUIR");
+        Label warning = new Label("Esta ação exclui o banco atual e não pode ser desfeita. "
+                + "Os arquivos de backup existentes serão preservados. Digite EXCLUIR para confirmar.");
+        warning.setWrapText(true);
+        dialog.getDialogPane().setContent(new VBox(CONTROL_SPACING_PIXELS,
+                warning, labeledField("Confirmação da exclusão", confirmation)));
+        dialog.getDialogPane().getStylesheets().addAll(root.getScene().getStylesheets());
+        Button deleteButton = (Button) dialog.getDialogPane().lookupButton(delete);
+        deleteButton.getStyleClass().add("danger-button");
+        deleteButton.setDefaultButton(false);
+        deleteButton.disableProperty().bind(confirmation.textProperty().isNotEqualTo("EXCLUIR"));
+        if (dialog.showAndWait().orElse(cancel) == delete && !busy) {
+            deleteVault();
+        }
+    }
+
+    /** Executa a exclusão confirmada fora da thread JavaFX e retorna à criação do cofre. */
+    private void deleteVault() {
+        generation++;
+        busy = true;
+        clearSensitive();
+        message.setText("Excluindo cofre…");
+        worker.submit(() -> {
+            Exception failure = null;
+            try {
+                vault.deleteVault();
+            } catch (Exception exception) {
+                failure = exception;
+            }
+            Exception result = failure;
+            Platform.runLater(() -> {
+                busy = false;
+                if (stopped) {
+                    return;
+                }
+                showLocked();
+                message.setText(result == null
+                        ? "Cofre excluído. Crie uma nova senha mestra para começar do zero."
+                        : "Não foi possível concluir a exclusão do cofre. Confira o arquivo antes de tentar novamente.");
+            });
+        });
     }
 
     private void showVault() {
@@ -491,7 +587,6 @@ public class VaultApp extends Application {
                             : "Não foi possível abrir o cofre. Confira a senha; o arquivo"
                                     + " também pode estar danificado.");
         } else {
-            lastActivityNanos = System.nanoTime();
             showVault();
         }
     }
@@ -652,7 +747,7 @@ public class VaultApp extends Application {
 
     /**
      * Pesquisa apenas nos dados descriptografados da sessão. Uma falha de leitura ou integridade
-     * remove as credenciais da tela por meio do bloqueio, sem manter resultados antigos visíveis.
+     * remove os resultados da tela e informa o erro, preservando a escolha de sessão do usuário.
      */
     private void refresh() {
         if (!vault.unlocked()) {
@@ -674,8 +769,9 @@ public class VaultApp extends Application {
                 }
             }
         } catch (Exception e) {
-            lock();
-            message.setText("Falha de integridade ou leitura. O cofre foi bloqueado.");
+            accountCards.getChildren().clear();
+            clearForm();
+            message.setText("Falha de integridade ou leitura. Os dados não puderam ser carregados.");
         }
     }
 
@@ -716,7 +812,6 @@ public class VaultApp extends Application {
             statusServer.close();
         }
         generation++;
-        timer.stop();
         worker.shutdownNow();
         vault.close();
         if (pendingExtensionUnlock != null) {
@@ -725,6 +820,9 @@ public class VaultApp extends Application {
             pendingExtensionUnlock = null;
         }
         clearSensitive();
+        if (windowLifecycle != null) {
+            windowLifecycle.close();
+        }
     }
 
     public static void main(String[] args) {

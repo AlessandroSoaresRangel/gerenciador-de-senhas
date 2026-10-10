@@ -16,6 +16,7 @@ public final class StatusProtocol {
     private final AccountQuery accounts;
     private final FillProtocol fill;
     private final UnlockProtocol unlock;
+    private final SaveAccountProtocol saveAccount;
     private final ObjectMapper json = new ObjectMapper();
 
     public StatusProtocol(Supplier<String> status) {
@@ -35,10 +36,16 @@ public final class StatusProtocol {
     }
 
     public StatusProtocol(Supplier<String> status, AccountQuery accounts, FillProtocol fill, UnlockProtocol unlock) {
+        this(status, accounts, fill, unlock, new SaveAccountProtocol(null, () -> {}));
+    }
+
+    public StatusProtocol(Supplier<String> status, AccountQuery accounts, FillProtocol fill,
+            UnlockProtocol unlock, SaveAccountProtocol saveAccount) {
         this.status = status;
         this.accounts = accounts;
         this.fill = fill;
         this.unlock = unlock;
+        this.saveAccount = saveAccount;
     }
 
     public byte[] handle(byte[] input) throws Exception {
@@ -61,6 +68,9 @@ public final class StatusProtocol {
             return error("");
         }
         String command = request.path("command").asText();
+        if ("SAVE_NEW_ACCOUNT".equals(command)) {
+            return saveAccount.handle(request, id);
+        }
         if ("UNLOCK_VAULT".equals(command)) {
             return unlock.handle(request, id);
         }

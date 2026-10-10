@@ -1,10 +1,46 @@
 import { HOST_NAME, NATIVE_REQUEST_TIMEOUT_MILLIS, PROTOCOL_VERSION, validateStatus } from "./status.js";
-import { listActiveTabMatches } from "./matches.js";
+import { httpsOrigin, listActiveTabMatches } from "./matches.js";
 import { fillAccount } from "./fill.js";
 import { automaticAccount, setAutomaticAccount } from "./autofill.js";
 import { unlockVault } from "./unlock.js";
+import {handleCaptureMessage} from "./account-capture.js";
 
 const pendingAutomaticTabs = new Set<number>();
+const consultedVisits = new Map<number, {url: string}>();
+
+/** Consulta uma vez por navegação; guarda só a identidade da visita, sem credenciais. */
+async function consultSiteAccounts(tabId: number) {
+    try {
+        const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+        if (tab?.id !== tabId || !tab.url || tab.status === "loading")
+            return;
+        const origin = httpsOrigin(tab.url);
+        if (consultedVisits.get(tabId)?.url === tab.url)
+            return;
+        const visit = {url: tab.url};
+        consultedVisits.set(tabId, visit);
+        try {
+            const result = await listActiveTabMatches();
+            const [current] = await chrome.tabs.query({active: true, currentWindow: true});
+            // Uma resposta de uma navegação anterior nunca atualiza o indicador da nova visita.
+            if (consultedVisits.get(tabId) !== visit || current?.id !== tabId
+                    || current.url !== visit.url || result.origin !== origin)
+                return;
+            await chrome.action.setBadgeText({tabId,
+                text: result.accounts.length ? String(result.accounts.length) : ""});
+        } catch {
+            if (consultedVisits.get(tabId) === visit)
+                await chrome.action.setBadgeText({tabId, text: ""});
+        }
+    } catch {
+        // HTTP, páginas internas ou aba indisponível não consultam o cofre.
+    }
+}
+
+async function visitActiveSite(tabId: number) {
+    await consultSiteAccounts(tabId);
+    await tryAutomaticFill(tabId);
+}
 
 async function tryAutomaticFill(tabId: number) {
     if (pendingAutomaticTabs.has(tabId))
@@ -27,12 +63,22 @@ async function tryAutomaticFill(tabId: number) {
 }
 
 chrome.tabs.onUpdated.addListener((tabId, change) => {
+    if (change.status === "loading" || change.url !== undefined) {
+        consultedVisits.delete(tabId);
+        void chrome.action.setBadgeText({tabId, text: ""}).catch(() => {});
+    }
     if (change.status === "complete")
-        void tryAutomaticFill(tabId);
+        void visitActiveSite(tabId);
 });
-chrome.tabs.onActivated.addListener(({tabId}) => void tryAutomaticFill(tabId));
+chrome.tabs.onActivated.addListener(({tabId}) => void visitActiveSite(tabId));
+chrome.tabs.onRemoved.addListener(tabId => consultedVisits.delete(tabId));
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
+    if (typeof message === "object" && message !== null
+            && ["CAPTURE_LOGIN", "GET_CAPTURED_LOGIN", "SAVE_NEW_ACCOUNT"]
+                .includes(String((message as Record<string, unknown>).command))) {
+        return handleCaptureMessage(message as Record<string, unknown>, sender, respond);
+    }
     // Somente o popup próprio pode consultar o cofre; mensagens de páginas/sites são recusadas.
     if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL("popup.html") ||
         typeof message !== "object" || message === null ||

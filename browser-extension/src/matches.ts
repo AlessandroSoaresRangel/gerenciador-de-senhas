@@ -27,7 +27,7 @@ export function validateMatches(response: unknown, requestId: string, origin: st
         return { id: item.id, title: item.title, username: item.username };
     });
 }
-function nativeRequest(request: Record<string, unknown>): Promise<unknown> {
+export function nativeRequest(request: Record<string, unknown>): Promise<unknown> {
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("TIMEOUT")), NATIVE_REQUEST_TIMEOUT_MILLIS);
         chrome.runtime.sendNativeMessage(HOST_NAME, request, response => {

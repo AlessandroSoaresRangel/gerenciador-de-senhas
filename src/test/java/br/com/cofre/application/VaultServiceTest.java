@@ -18,6 +18,29 @@ class VaultServiceTest {
         return "uma senha mestra forte".toCharArray();
     }
 
+    @Test
+    void deleteLockedVaultAllowsCreatingEmptyVaultWithNewPassword() throws Exception {
+        Path database = temp.resolve("reset.db");
+        Path backup = temp.resolve("preserved.cofre");
+        try (var vault = new VaultService(database)) {
+            vault.create(master());
+            vault.save(null, credential());
+            vault.backup(backup);
+            byte[] backupContents = Files.readAllBytes(backup);
+            vault.lock();
+            vault.deleteVault();
+            assertFalse(vault.exists());
+            assertFalse(vault.unlocked());
+            assertArrayEquals(backupContents, Files.readAllBytes(backup));
+            vault.create("nova senha fictícia".toCharArray());
+            assertTrue(vault.list().isEmpty());
+            vault.lock();
+            assertThrows(Exception.class, () -> vault.unlock(master()));
+            vault.unlock("nova senha fictícia".toCharArray());
+            assertTrue(vault.list().isEmpty());
+        }
+    }
+
     private Credential credential() {
         return new Credential(
                 "Conta privada",
@@ -88,7 +111,8 @@ class VaultServiceTest {
                 s.executeUpdate("UPDATE vault_item SET ciphertext=zeroblob(length(ciphertext))");
             }
             assertThrows(Exception.class, vault::list);
-            assertFalse(vault.unlocked());
+            assertTrue(vault.unlocked());
+            assertThrows(Exception.class, vault::list);
         }
     }
 
