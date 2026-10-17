@@ -13,6 +13,8 @@ public interface VaultRepository extends AutoCloseable {
 
     List<EncryptedItem> readItems() throws SQLException;
 
+    java.util.Optional<EncryptedItem> readItem(String id) throws SQLException;
+
     void saveItem(EncryptedItem item) throws SQLException;
 
     void deleteItem(String id) throws SQLException;

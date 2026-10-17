@@ -30,7 +30,8 @@ async function update() {
         unlockForm.hidden = !(response?.ok && response.status === "LOCKED");
         if (!response?.ok || response.status !== "UNLOCKED") {
             clearAccounts();
-            statusLabel.textContent = response?.ok && labels[response.status] ? labels[response.status] :
+            statusLabel.textContent = response?.error === "TIMEOUT" ? "O aplicativo demorou para responder. Tente atualizar." :
+                response?.ok && labels[response.status] ? labels[response.status] :
                 "Conexão indisponível. Confira a instalação do host e tente atualizar.";
         }
         if (response?.ok && response.status === "UNLOCKED") {

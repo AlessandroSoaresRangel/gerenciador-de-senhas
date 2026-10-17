@@ -9,6 +9,9 @@ import br.com.cofre.nativehost.StatusProtocol;
 import br.com.cofre.nativehost.UnlockProtocol;
 import br.com.cofre.nativehost.SaveAccountProtocol;
 
+import javafx.animation.KeyFrame;
+import javafx.animation.PauseTransition;
+import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -17,9 +20,13 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
 import java.nio.file.Path;
 import java.util.*;
@@ -39,6 +46,32 @@ public class VaultApp extends Application {
     private static final int ACCESS_CARD_WIDTH_PIXELS = 480;
     private static final int MIN_WINDOW_WIDTH_PIXELS = 960;
     private static final int MIN_WINDOW_HEIGHT_PIXELS = 740;
+
+    private static final int IDLE_CHECK_INTERVAL_MILLIS = 250;
+    private AppSettings settings = AppSettings.defaults();
+    private AppSettingsStore settingsStore;
+    private final InactivityLock inactivityLock = new InactivityLock(System::nanoTime, () -> {
+        lock();
+        this.message.setText("Cofre bloqueado por inatividade.");
+    });
+    private final Timeline inactivityChecks = new Timeline(
+            new KeyFrame(Duration.millis(IDLE_CHECK_INTERVAL_MILLIS), event -> inactivityLock.check()));
+    private final PauseTransition clipboardExpiration =
+            new PauseTransition(Duration.seconds(AppSettings.DEFAULT_CLIPBOARD_CLEAR_SECONDS));
+    private final ClipboardSecrets clipboardSecrets = new ClipboardSecrets(
+            () -> Clipboard.getSystemClipboard().getString(),
+            value -> {
+                ClipboardContent content = new ClipboardContent();
+                content.putString(value);
+                return Clipboard.getSystemClipboard().setContent(content);
+            },
+            () -> Clipboard.getSystemClipboard().clear(),
+            expiration -> {
+                clipboardExpiration.stop();
+                clipboardExpiration.setDuration(Duration.seconds(settings.clipboardClearSeconds()));
+                clipboardExpiration.setOnFinished(event -> expiration.run());
+                clipboardExpiration.playFromStart();
+            });
 
     private VaultService vault;
     private StatusServer statusServer;
@@ -83,6 +116,14 @@ public class VaultApp extends Application {
                 custom == null
                         ? Path.of(System.getProperty("user.home"), ".cofre-local", "vault.db")
                         : Path.of(custom);
+        settingsStore = new AppSettingsStore(path.toAbsolutePath().getParent().resolve("app-settings.properties"));
+        boolean settingsUnavailable = false;
+        try {
+            settings = settingsStore.load();
+        } catch (java.io.IOException failure) {
+            settingsUnavailable = true;
+        }
+        inactivityLock.configure(settings.idleLockSeconds());
         vault = new VaultService(path);
         statusServer =
                 new StatusServer(
@@ -100,6 +141,7 @@ public class VaultApp extends Application {
         message.setWrapText(true);
         message.managedProperty().bind(message.textProperty().isNotEmpty());
         Scene scene = new Scene(root, WINDOW_WIDTH_PIXELS, WINDOW_HEIGHT_PIXELS);
+        configureInactivityTracking(scene);
         scene.getStylesheets().add(Objects.requireNonNull(
                 VaultApp.class.getResource("vault.css"), "Tema da interface ausente").toExternalForm());
         stage.setMinWidth(MIN_WINDOW_WIDTH_PIXELS);
@@ -108,6 +150,11 @@ public class VaultApp extends Application {
         stage.setScene(scene);
         configureWindowLifecycle(stage);
         showLocked();
+        if (settingsUnavailable) {
+            message.setText("Não foi possível ler as configurações. Usando os tempos padrão.");
+        }
+        inactivityChecks.setCycleCount(Timeline.INDEFINITE);
+        inactivityChecks.play();
         stage.show();
     }
 
@@ -173,6 +220,7 @@ public class VaultApp extends Application {
      * derivação de chave roda no worker; somente o retorno à thread JavaFX altera a tela.
      */
     private void showLocked() {
+        inactivityLock.stop();
         clearSensitive();
         root.getChildren().clear();
         try {
@@ -190,6 +238,7 @@ public class VaultApp extends Application {
             submit.setOnAction(event -> authenticate(creating, master, confirmation, submit));
             root.getChildren()
                     .addAll(
+                            createSettingsButton(),
                             heading,
                             new Label(
                                     "Os dados ficam criptografados neste computador. Guarde a senha"
@@ -318,6 +367,7 @@ public class VaultApp extends Application {
                 new Label("Selecione uma conta para editar ou adicione um novo cadastro."),
                 toolbar, cardsScroll, message, createBackupControls());
         refresh();
+        search.requestFocus();
     }
 
     private void bindCredentialListeners() {
@@ -600,6 +650,7 @@ public class VaultApp extends Application {
                             : "Não foi possível abrir o cofre. Confira a senha; o arquivo"
                                     + " também pode estar danificado.");
         } else {
+            inactivityLock.start();
             showVault();
         }
     }
@@ -669,9 +720,7 @@ public class VaultApp extends Application {
     }
 
     private void copyPassword(String value) {
-        ClipboardContent content = new ClipboardContent();
-        content.putString(value);
-        boolean copied = Clipboard.getSystemClipboard().setContent(content);
+        boolean copied = clipboardSecrets.copy(value);
         message.setText(copied ? "Senha copiada." : "Não foi possível copiar a senha.");
     }
 
@@ -684,13 +733,87 @@ public class VaultApp extends Application {
         return controls;
     }
 
+    private void configureInactivityTracking(Scene scene) {
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> inactivityLock.activity());
+        scene.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> inactivityLock.activity());
+        scene.addEventFilter(MouseEvent.MOUSE_MOVED, event -> inactivityLock.activity());
+        scene.addEventFilter(ScrollEvent.SCROLL, event -> inactivityLock.activity());
+    }
+
+    private Button createSettingsButton() {
+        Button button = new Button();
+        button.setGraphic(new SettingsIcon());
+        button.setFocusTraversable(false);
+        button.setAccessibleText("Configurações");
+        button.setTooltip(new Tooltip("Configurações"));
+        button.getStyleClass().add("settings-button");
+        button.setOnAction(event -> {
+            if (!busy) {
+                showSettings();
+            }
+        });
+        return button;
+    }
+
+    /** Os novos tempos só entram em vigor depois de salvar as preferências. */
+    private void showSettings() {
+        clearSensitive();
+        root.getChildren().clear();
+        message.setText("");
+        Label heading = new Label("Configurações");
+        heading.getStyleClass().add("page-heading");
+        TextField idleSeconds = new TextField(Integer.toString(settings.idleLockSeconds()));
+        idleSeconds.setPromptText("Bloqueio automático (segundos)");
+        TextField clipboardSeconds = new TextField(Integer.toString(settings.clipboardClearSeconds()));
+        clipboardSeconds.setPromptText("Limpeza da área de transferência (segundos)");
+        Button save = new Button("Salvar configurações");
+        save.getStyleClass().add("primary-button");
+        save.setOnAction(event -> saveSettings(idleSeconds, clipboardSeconds));
+        Button back = new Button("Voltar");
+        back.setOnAction(event -> {
+            if (vault.unlocked()) {
+                showVault();
+            } else {
+                showLocked();
+            }
+        });
+        Label idleHint = new Label("Tempo sem usar o desktop, inclusive na bandeja. De 1 a "
+                + AppSettings.MAX_IDLE_LOCK_SECONDS + " segundos; 0 desativa o bloqueio automático.");
+        idleHint.setWrapText(true);
+        Label clipboardHint = new Label("De 1 a " + AppSettings.MAX_CLIPBOARD_CLEAR_SECONDS
+                + " segundos. Conteúdo copiado depois por você é preservado.");
+        clipboardHint.setWrapText(true);
+        root.getChildren().addAll(heading, labeledField("Bloqueio automático (segundos)", idleSeconds),
+                idleHint, labeledField("Limpeza da área de transferência (segundos)", clipboardSeconds),
+                clipboardHint, new HBox(CONTROL_SPACING_PIXELS, save, back), message);
+        centerAccessCard();
+    }
+
+    private void saveSettings(TextField idleSeconds, TextField clipboardSeconds) {
+        try {
+            AppSettings updated = new AppSettings(Integer.parseInt(idleSeconds.getText().trim()),
+                    Integer.parseInt(clipboardSeconds.getText().trim()));
+            settingsStore.save(updated);
+            settings = updated;
+            inactivityLock.configure(updated.idleLockSeconds());
+            // Evita prolongar a retenção de um segredo copiado antes da mudança de prazo.
+            clipboardExpiration.stop();
+            clipboardSecrets.clear();
+            message.setText("Configurações salvas.");
+        } catch (IllegalArgumentException invalid) {
+            message.setText("Informe tempos inteiros nos limites indicados.");
+        } catch (java.io.IOException failure) {
+            message.setText("Não foi possível salvar as configurações. Os tempos anteriores foram mantidos.");
+        }
+    }
+
     private HBox createHeader(Label heading, Button lockButton) {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Label brand = new Label("COFRE LOCAL");
         brand.getStyleClass().add("brand-label");
         VBox identity = new VBox(LABEL_SPACING_PIXELS, brand, heading);
-        HBox header = new HBox(SECTION_SPACING_PIXELS, identity, spacer, lockButton);
+        HBox header = new HBox(SECTION_SPACING_PIXELS, identity, spacer, createSettingsButton(), lockButton);
         header.setAlignment(Pos.CENTER_LEFT);
         return header;
     }
@@ -815,6 +938,8 @@ public class VaultApp extends Application {
     }
 
     private void clearSensitive() {
+        clipboardExpiration.stop();
+        clipboardSecrets.clear();
         accountCards.getChildren().clear();
         clearForm();
         search.clear();
@@ -831,6 +956,8 @@ public class VaultApp extends Application {
     @Override
     public void stop() throws Exception {
         stopped = true;
+        inactivityChecks.stop();
+        inactivityLock.stop();
         if (statusServer != null) {
             statusServer.close();
         }

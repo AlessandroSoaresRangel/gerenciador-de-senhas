@@ -53,7 +53,7 @@ Os testes espelham os pacotes do código em `src/test/java/br/com/cofre`: `domai
 mvn test "-Dtest=*Test,!VaultAppTest"
 ```
 
-Na primeira execução, crie a senha mestra com pelo menos 12 caracteres. O SQLite fica em `%USERPROFILE%\.cofre-local\vault.db`. Para usar outro arquivo:
+Na primeira execução, crie a senha mestra com 12 a 4.096 caracteres. Cofres antigos com senhas maiores continuam acessíveis pelo desktop; o desbloqueio pela extensão aceita até 4.096 caracteres. O SQLite fica em `%USERPROFILE%\.cofre-local\vault.db`. Para usar outro arquivo:
 
 ```powershell
 mvn javafx:run "-Djavafx.options=-Dvault.path=C:/caminho/cofre.db"
@@ -174,3 +174,18 @@ O código é separado por responsabilidade, em um único projeto Maven:
 Os testes cobrem persistência, senha incorreta, bloqueio, CRUD, ausência de campos em texto aberto, rejeição de adulteração, compatibilidade com backups da versão 1, substituição do cofre e rollback em falhas de gravação.
 
 Referências de implementação: [OpenJFX/Maven](https://openjfx.io/openjfx-docs/#maven) e [Argon2 do Bouncy Castle](https://github.com/bcgit/bc-java/blob/main/core/src/main/java/org/bouncycastle/crypto/generators/Argon2BytesGenerator.java).
+
+Senhas copiadas pelo desktop são removidas da área de transferência no prazo configurado (30 segundos por padrão), ao bloquear ou ao encerrar o aplicativo, desde que o conteúdo ainda seja o copiado pelo cofre. Conteúdo substituído pelo usuário é preservado; históricos e cópias mantidas por outros aplicativos não são controlados pelo cofre.
+
+O preenchimento lê e autentica apenas o registro selecionado pelo ID. Um registro corrompido continua sendo recusado, mas não impede preencher outra conta saudável. A listagem e a busca por origem ainda precisam descriptografar os registros, pois os metadados permanecem criptografados; essas operações rejeitam a lista inteira em caso de corrupção.
+
+Na ponte local, endpoint ausente ou conexão recusada indicam `APP_CLOSED`; timeout indica `TIMEOUT`; endpoint ou resposta inválidos indicam `UNAVAILABLE`.
+
+### Configurações do desktop
+
+Clique no botão **⚙** para abrir as configurações, disponível tanto na tela de acesso quanto no cabeçalho das contas. Ajuste os tempos em segundos e clique em **Salvar configurações**. **Voltar** descarta alterações não salvas.
+
+- **Bloqueio automático:** padrão de 300 segundos (5 minutos), de 1 a 86.400 segundos; use 0 para desativar. Teclado, movimento/clique do mouse e rolagem dentro do desktop reiniciam a contagem. O prazo começa ao criar/desbloquear o cofre, inclusive pela extensão, e continua com a janela oculta ou minimizada. Consultas da extensão não renovam o prazo. O bloqueio limpa os campos e invalida as autorizações de preenchimento pendentes.
+- **Limpeza da área de transferência:** padrão de 30 segundos, de 1 a 3.600 segundos. Cada cópia usa o prazo salvo. Abrir as configurações também limpa um segredo ainda copiado pelo cofre.
+
+As preferências ficam em `app-settings.properties`, na mesma pasta do banco, e são carregadas na próxima execução. Alterar esses tempos não modifica o formato do cofre ou dos backups. Se o arquivo de preferências estiver inválido ou inacessível, o aplicativo avisa e usa os padrões. Novos tempos entram em vigor após salvar; a contagem de inatividade é reiniciada.

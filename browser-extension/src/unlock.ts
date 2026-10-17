@@ -2,7 +2,7 @@ import {HOST_NAME, PROTOCOL_VERSION, validateStatus} from "./status.js";
 
 const UNLOCK_TIMEOUT_MILLIS = 20000;
 const MAX_PASSWORD_LENGTH_CHARACTERS = 4096;
-const unlockErrors = ["APP_CLOSED", "UNLOCK_DENIED", "UNAVAILABLE"];
+const unlockErrors = ["APP_CLOSED", "UNLOCK_DENIED", "UNAVAILABLE", "TIMEOUT"];
 
 /** A senha transita somente até a sessão desktop; não é salva nem devolvida ao popup. */
 export async function unlockVault(password: string) {

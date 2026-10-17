@@ -141,6 +141,21 @@ public final class SqliteVaultRepository implements VaultRepository {
     }
 
     @Override
+    public java.util.Optional<EncryptedItem> readItem(String id) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT id, version, nonce, ciphertext FROM vault_item WHERE id = ?")) {
+            statement.setString(1, id);
+            try (ResultSet row = statement.executeQuery()) {
+                if (!row.next()) {
+                    return java.util.Optional.empty();
+                }
+                return java.util.Optional.of(new EncryptedItem(row.getString("id"), row.getInt("version"),
+                        row.getBytes("nonce"), row.getBytes("ciphertext")));
+            }
+        }
+    }
+
+    @Override
     public void saveItem(EncryptedItem item) throws SQLException {
         writeItem(item, true);
     }

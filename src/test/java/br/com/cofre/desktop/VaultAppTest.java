@@ -59,6 +59,8 @@ class VaultAppTest {
             assertTrue(json.readTree(client.query(request)).path("ok").asBoolean());
             runOnJavaFx(() -> {
                 Parent root = stageReference.join().getScene().getRoot();
+                assertSame(textField(root, "Pesquisar título, usuário ou site"),
+                        stageReference.join().getScene().getFocusOwner());
                 assertTrue(hasLabel(root, "Minhas credenciais"));
                 assertTrue(hasLabel(root, "Conta existente"));
                 assertTrue(hasLabel(root, "Outra conta existente"));
@@ -78,7 +80,10 @@ class VaultAppTest {
                 stage.setIconified(true);
                 assertTrue(hasLabel(root, "Conta existente"));
                 stage.setIconified(false);
+                button(root, "Copiar senha").fire();
+                assertEquals("segredo ficticio", javafx.scene.input.Clipboard.getSystemClipboard().getString());
                 button(root, "Bloquear agora").fire();
+                assertFalse(javafx.scene.input.Clipboard.getSystemClipboard().hasString());
                 assertTrue(hasLabel(root, "Cofre bloqueado"));
                 assertFalse(hasLabel(root, "Conta existente"));
             });
@@ -86,6 +91,123 @@ class VaultAppTest {
             runOnJavaFx(() -> {
                 application.stop();
                 assertTrue(tray.closed);
+                stageReference.join().hide();
+                if (previousPath == null) {
+                    System.clearProperty("vault.path");
+                } else {
+                    System.setProperty("vault.path", previousPath);
+                }
+            });
+        }
+    }
+
+    @Test
+    void settingsGearSavesDurationsAndBackKeepsVaultLocked() throws Exception {
+        var application = new VaultApp(new RecordingTray());
+        var stageReference = new CompletableFuture<Stage>();
+        String previousPath = System.getProperty("vault.path");
+        try {
+            runOnJavaFx(() -> {
+                System.setProperty("vault.path", directory.resolve("settings.db").toString());
+                Stage stage = new Stage();
+                stageReference.complete(stage);
+                application.start(stage);
+                Parent root = stage.getScene().getRoot();
+                button(root, "Configurações").fire();
+                assertTrue(hasLabel(root, "Configurações"));
+                textField(root, "Bloqueio automático (segundos)").setText("invalid");
+                button(root, "Salvar configurações").fire();
+                assertTrue(hasLabel(root, "Informe tempos inteiros nos limites indicados."));
+                textField(root, "Bloqueio automático (segundos)").setText("60");
+                textField(root, "Limpeza da área de transferência (segundos)").setText("15");
+                button(root, "Salvar configurações").fire();
+                assertTrue(hasLabel(root, "Configurações salvas."));
+                button(root, "Voltar").fire();
+                assertTrue(hasLabel(root, "Crie seu cofre local"));
+                button(root, "Configurações").fire();
+                assertEquals("60", textField(root, "Bloqueio automático (segundos)").getText());
+                assertEquals("15", textField(root, "Limpeza da área de transferência (segundos)").getText());
+            });
+        } finally {
+            runOnJavaFx(() -> {
+                application.stop();
+                stageReference.join().hide();
+                if (previousPath == null) {
+                    System.clearProperty("vault.path");
+                } else {
+                    System.setProperty("vault.path", previousPath);
+                }
+            });
+        }
+    }
+
+    @Test
+    void configuredClipboardExpiresAndHiddenDesktopLocksAfterExtensionUnlock() throws Exception {
+        Path database = directory.resolve("timers.db");
+        new AppSettingsStore(directory.resolve("app-settings.properties")).save(new AppSettings(0, 1));
+        try (var vault = new br.com.cofre.application.VaultService(database)) {
+            vault.create("synthetic master password".toCharArray());
+            vault.save(null, new br.com.cofre.domain.Credential("Timer account", "test user",
+                    "synthetic secret", List.of(), false, ""));
+        }
+        var application = new VaultApp(new RecordingTray());
+        var stageReference = new CompletableFuture<Stage>();
+        var clipboardExpired = new CompletableFuture<Void>();
+        var locked = new CompletableFuture<Void>();
+        String previousPath = System.getProperty("vault.path");
+        try {
+            runOnJavaFx(() -> {
+                System.setProperty("vault.path", database.toString());
+                Stage stage = new Stage();
+                stageReference.complete(stage);
+                application.start(stage);
+            });
+            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            var client = new br.com.cofre.ipc.StatusClient(directory.resolve("ipc/endpoint.json"));
+            byte[] request = json.writeValueAsBytes(java.util.Map.of("version", 1,
+                    "command", "UNLOCK_VAULT", "requestId", "timer-test", "password", "synthetic master password"));
+            assertTrue(json.readTree(client.query(request)).path("ok").asBoolean());
+            runOnJavaFx(() -> {
+                Stage stage = stageReference.join();
+                Parent root = stage.getScene().getRoot();
+                button(root, "Copiar senha").fire();
+                assertEquals("synthetic secret", javafx.scene.input.Clipboard.getSystemClipboard().getString());
+                stage.hide();
+                var afterExpiration = new javafx.animation.PauseTransition(javafx.util.Duration.seconds(2));
+                afterExpiration.setOnFinished(event -> {
+                    try {
+                        assertFalse(javafx.scene.input.Clipboard.getSystemClipboard().hasString());
+                        assertTrue(hasLabel(root, "Minhas credenciais"));
+                        clipboardExpired.complete(null);
+                    } catch (Throwable failure) {
+                        clipboardExpired.completeExceptionally(failure);
+                    }
+                });
+                afterExpiration.play();
+            });
+            clipboardExpired.get(JAVAFX_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            runOnJavaFx(() -> {
+                Pane root = (Pane) stageReference.join().getScene().getRoot();
+                root.getChildren().addListener((ListChangeListener<Node>) change -> {
+                    if (hasLabel(root, "Cofre bloqueado")) {
+                        locked.complete(null);
+                    }
+                });
+                button(root, "Configurações").fire();
+                textField(root, "Bloqueio automático (segundos)").setText("1");
+                button(root, "Salvar configurações").fire();
+                button(root, "Voltar").fire();
+                assertTrue(hasLabel(root, "Minhas credenciais"));
+            });
+            locked.get(JAVAFX_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            var status = json.readTree(client.query(json.writeValueAsBytes(java.util.Map.of("version", 1,
+                    "command", "GET_STATUS", "requestId", "after-idle"))));
+            assertEquals("LOCKED", status.path("status").asText());
+            runOnJavaFx(() -> assertTrue(hasLabel(stageReference.join().getScene().getRoot(),
+                    "Cofre bloqueado por inatividade.")));
+        } finally {
+            runOnJavaFx(() -> {
+                application.stop();
                 stageReference.join().hide();
                 if (previousPath == null) {
                     System.clearProperty("vault.path");
@@ -228,6 +350,8 @@ class VaultAppTest {
             unlocked.get(JAVAFX_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             runOnJavaFx(() -> {
                 Parent root = stageReference.join().getScene().getRoot();
+                assertSame(textField(root, "Pesquisar título, usuário ou site"),
+                        stageReference.join().getScene().getFocusOwner());
                 assertFalse(descendants(root).anyMatch(PasswordField.class::isInstance));
                 button(root, "Adicionar conta").fire();
                 textField(root, "Título").setText("Rascunho");
@@ -419,7 +543,7 @@ class VaultAppTest {
         return descendants(root)
                 .filter(Button.class::isInstance)
                 .map(Button.class::cast)
-                .filter(button -> text.equals(button.getText()))
+                .filter(button -> text.equals(button.getText()) || text.equals(button.getAccessibleText()))
                 .findFirst()
                 .orElseThrow();
     }

@@ -145,6 +145,12 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
             return;
         }
         try {
+            const failure = response as Record<string, unknown> | null;
+            if (failure?.version === PROTOCOL_VERSION && failure.requestId === requestId
+                    && failure.ok === false && failure.error === "TIMEOUT") {
+                finish({ok: false, error: "TIMEOUT"});
+                return;
+            }
             finish({ ok: true, status: validateStatus(response, requestId) });
         }
         catch {

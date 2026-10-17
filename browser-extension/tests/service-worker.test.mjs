@@ -192,3 +192,14 @@ test("saving first account selects automatic account; multiple accounts preserve
     assert.equal(writes[0].autofill["https://auto.exemplo.com"], "new");
   }
 });
+
+test("status preserves correlated IPC timeout and rejects unrelated errors", () => {
+  for (const correlated of [true, false]) {
+    chrome.runtime.sendNativeMessage = (_host, request, callback) => callback({version: 1,
+      requestId: correlated ? request.requestId : "other", ok: false, error: "TIMEOUT"});
+    let response;
+    handler({command: "GET_STATUS"}, {id: "extension-test", url: "chrome-extension://extension-test/popup.html"},
+      value => {response = value;});
+    assert.deepEqual(response, {ok: false, error: correlated ? "TIMEOUT" : "INVALID_RESPONSE"});
+  }
+});

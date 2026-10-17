@@ -69,3 +69,17 @@
 .cards-scroll { -fx-padding: 2px; -fx-border-width: 0; }
 .account-card { -fx-effect: dropshadow(gaussian, #e0e6ef, 8, 0.08, 0, 2); }
 .account-card:hover { -fx-border-color: #b8c9ee; }
+
+.settings-button {
+    -fx-padding: 9px;
+    -fx-min-width: 42px;
+    -fx-min-height: 42px;
+}
+
+.settings-icon {
+    -fx-fill: transparent;
+    -fx-stroke: #344663;
+    -fx-stroke-width: 2px;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}

@@ -29,6 +29,7 @@ import java.util.UUID;
  */
 public final class VaultService implements AutoCloseable {
     public static final int MIN_MASTER_PASSWORD_LENGTH_CHARACTERS = 12;
+    public static final int MAX_MASTER_PASSWORD_LENGTH_CHARACTERS = 4096;
     private static final int MAX_DOCUMENT_IDENTIFIER_LENGTH = 200;
 
     private final VaultRepository repository;
@@ -92,14 +93,14 @@ public final class VaultService implements AutoCloseable {
                 || document.length() > MAX_DOCUMENT_IDENTIFIER_LENGTH) {
             throw new IllegalArgumentException("Documento inválido.");
         }
-        VaultEntry entry =
-                list().stream()
-                        .filter(item -> item.id().equals(accountId)
-                                && item.credential().allowedOrigins().contains(normalized)
-                                && (!automatic || item.credential().autofillEnabled()))
-                        .findFirst()
-                        .orElseThrow(() -> new IllegalArgumentException(
-                                "Conta não autorizada para esta origem."));
+        var item = repository.readItem(accountId)
+                .orElseThrow(() -> new IllegalArgumentException("Conta nao autorizada para esta origem."));
+        // Valida a integridade da conta selecionada sem depender de registros de outras contas.
+        VaultEntry entry = credentialCipher.decrypt(item, vaultKey);
+        if (!entry.credential().allowedOrigins().contains(normalized)
+                || (automatic && !entry.credential().autofillEnabled())) {
+            throw new IllegalArgumentException("Conta nao autorizada para esta origem.");
+        }
         FillAuthorizations.Ticket ticket = fillAuthorizations.issue(normalized, accountId, document);
         return new FillCredential(
                 ticket.token(),
@@ -162,6 +163,10 @@ public final class VaultService implements AutoCloseable {
                         "Use pelo menos " + MIN_MASTER_PASSWORD_LENGTH_CHARACTERS
                                 + " caracteres na senha mestra.");
             }
+            if (password.length > MAX_MASTER_PASSWORD_LENGTH_CHARACTERS) {
+                throw new IllegalArgumentException("Use no maximo " + MAX_MASTER_PASSWORD_LENGTH_CHARACTERS
+                        + " caracteres na senha mestra.");
+            }
             byte[] salt = VaultCrypto.random(VaultCrypto.SALT_LENGTH_BYTES);
             candidateKey = VaultCrypto.random(VaultCrypto.KEY_LENGTH_BYTES);
             wrappingKey =
@@ -198,6 +203,7 @@ public final class VaultService implements AutoCloseable {
      * incorreta ou chave adulterada; qualquer falha mantém a sessão bloqueada e apaga a senha.
      */
     public synchronized void unlock(char[] password) throws Exception {
+        // Cofres antigos podem ter senhas acima do limite atual de criacao.
         lock();
         byte[] wrappingKey = null;
         byte[] candidateKey = null;

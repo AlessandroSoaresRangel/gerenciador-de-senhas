@@ -14,7 +14,7 @@ test("forwards password transiently and accepts only correlated unlocked respons
 });
 
 test("closed app, wrong password and uncorrelated replies cannot unlock", async () => {
-  for (const error of ["APP_CLOSED", "UNLOCK_DENIED", "INVALID_RESPONSE"]) {
+  for (const error of ["APP_CLOSED", "UNLOCK_DENIED", "UNAVAILABLE", "TIMEOUT", "INVALID_RESPONSE"]) {
     globalThis.chrome = {runtime: {sendNativeMessage: (_host, request, respond) => {
       respond({version: request.version, requestId: error === "INVALID_RESPONSE" ? "other" : request.requestId,
         ok: false, error});

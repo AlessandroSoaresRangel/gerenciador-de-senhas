@@ -8,7 +8,7 @@ import java.util.Map;
 
 /** O host valida o pedido; somente a sessão desktop recebe a operação de desbloqueio. */
 public final class UnlockProtocol {
-    public static final int MAX_PASSWORD_LENGTH_CHARACTERS = 4096;
+    public static final int MAX_PASSWORD_LENGTH_CHARACTERS = br.com.cofre.application.VaultService.MAX_MASTER_PASSWORD_LENGTH_CHARACTERS;
     private static final int REQUEST_FIELD_COUNT = 4;
     private final UnlockAction unlock;
     private final boolean validationOnly;
@@ -34,6 +34,16 @@ public final class UnlockProtocol {
 
     /** Nunca inclui a senha ou detalhes de criptografia nas respostas, inclusive em falhas. */
     public byte[] handle(JsonNode request, String requestId) throws Exception {
+        try {
+            return handleSecret(request, requestId);
+        } finally {
+            if (request instanceof com.fasterxml.jackson.databind.node.ObjectNode object) {
+                object.put("password", "");
+            }
+        }
+    }
+
+    private byte[] handleSecret(JsonNode request, String requestId) throws Exception {
         JsonNode password = request.path("password");
         if (request.size() != REQUEST_FIELD_COUNT || !password.isTextual()
                 || password.asText().isEmpty()

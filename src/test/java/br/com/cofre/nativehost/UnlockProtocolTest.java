@@ -22,6 +22,22 @@ class UnlockProtocolTest {
     }
 
     @Test
+    void removesPasswordFromEnvelopeOnEveryExit() throws Exception {
+        for (boolean fail : new boolean[] {false, true}) {
+            var protocol = new UnlockProtocol(secret -> {
+                if (fail) throw new IllegalStateException("synthetic failure");
+            });
+            var envelope = json.readTree(request("synthetic password"));
+            protocol.handle(envelope, "test");
+            assertEquals("", envelope.path("password").asText());
+        }
+        var invalid = json.readTree(request(""));
+        invalid = ((com.fasterxml.jackson.databind.node.ObjectNode) invalid).put("extra", true).put("password", "synthetic");
+        new UnlockProtocol(secret -> {}).handle(invalid, "test");
+        assertEquals("", invalid.path("password").asText());
+    }
+
+    @Test
     void validatesHostEnvelopeAndWipesPasswordEvenWhenActionFails() throws Exception {
         var host = new StatusProtocol(() -> "APP_CLOSED", origin -> java.util.List.of(),
                 FillProtocol.validationOnly(), UnlockProtocol.validationOnly());
